@@ -1,0 +1,16 @@
+services:
+  jarvis:
+    build: .
+    container_name: jarvis
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./vault:/app/vault
+    networks:
+      - caddy-network
+
+networks:
+  caddy-network:
+    external: true
+    name: caddy-network
