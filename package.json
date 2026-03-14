@@ -19,6 +19,7 @@
     "express": "^5.2.1",
     "glob": "^13.0.6",
     "gray-matter": "^4.0.3",
+    "openai": "^6.29.0",
     "simple-git": "^3.33.0"
   },
   "devDependencies": {

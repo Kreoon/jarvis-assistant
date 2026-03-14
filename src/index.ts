@@ -7,6 +7,7 @@ import {
   isAllowed,
 } from "./whatsapp/client.js";
 import { processMessage } from "./ai/agent.js";
+import { transcribeAudio } from "./ai/transcriber.js";
 import { syncVault } from "./obsidian/vault.js";
 
 const app = express();
@@ -45,7 +46,7 @@ app.post("/webhook", async (req, res) => {
   const message = parseWebhookMessage(req.body);
   if (!message) return;
 
-  console.log(`📩 Message from ${message.from}: ${message.text}`);
+  console.log(`📩 ${message.type === "audio" ? "🎤 Audio" : "Message"} from ${message.from}: ${message.text || "(audio)"}`);
 
   // Security: only respond to allowed numbers
   if (!isAllowed(message.from)) {
@@ -57,11 +58,19 @@ app.post("/webhook", async (req, res) => {
   await markAsRead(message.messageId);
 
   try {
+    // Transcribe audio if needed
+    let text = message.text;
+    if (message.type === "audio" && message.mediaId) {
+      console.log("🎤 Transcribing audio...");
+      text = await transcribeAudio(message.mediaId);
+      console.log(`🎤 Transcription: ${text}`);
+    }
+
     // Sync vault before processing (pull latest changes)
     await syncVault();
 
     // Process through AI agent
-    const reply = await processMessage(message.from, message.text);
+    const reply = await processMessage(message.from, text);
 
     // Send response
     await sendMessage(message.from, reply);

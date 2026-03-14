@@ -17,6 +17,10 @@ export const config = {
     apiKey: process.env.ANTHROPIC_API_KEY!,
   },
 
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY!,
+  },
+
   // Obsidian
   obsidian: {
     repoUrl: process.env.OBSIDIAN_REPO_URL!,

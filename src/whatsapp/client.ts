@@ -7,6 +7,8 @@ interface WhatsAppMessage {
   text: string;
   messageId: string;
   timestamp: string;
+  type: "text" | "audio";
+  mediaId?: string;
 }
 
 /**
@@ -75,15 +77,28 @@ export function parseWebhookMessage(
 
     const message = value.messages[0];
 
-    // Only handle text messages for now
-    if (message.type !== "text") return null;
+    if (message.type === "text") {
+      return {
+        from: message.from,
+        text: message.text.body,
+        messageId: message.id,
+        timestamp: message.timestamp,
+        type: "text",
+      };
+    }
 
-    return {
-      from: message.from,
-      text: message.text.body,
-      messageId: message.id,
-      timestamp: message.timestamp,
-    };
+    if (message.type === "audio") {
+      return {
+        from: message.from,
+        text: "",
+        messageId: message.id,
+        timestamp: message.timestamp,
+        type: "audio",
+        mediaId: message.audio.id,
+      };
+    }
+
+    return null;
   } catch {
     return null;
   }
