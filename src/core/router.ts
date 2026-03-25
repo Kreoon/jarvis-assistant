@@ -1,0 +1,286 @@
+import { coreAgent } from '../agents/core/index.js';
+import { memoryAgent } from '../agents/memory/index.js';
+import { contentAgent } from '../agents/content/index.js';
+import { opsAgent } from '../agents/ops/index.js';
+import { analystAgent, isSocialMediaUrl, hasAnalystSession } from '../agents/analyst/index.js';
+import { matchSkills } from './skill-loader.js';
+import { agentLogger } from '../shared/logger.js';
+import type { ProgressCallback } from './base-agent.js';
+import type { AgentName, AgentRequest, AgentResponse } from '../shared/types.js';
+
+// Lazy-loaded modules to avoid circular imports
+let engineModule: typeof import('../agents/engine/index.js') | null = null;
+let reportModule: typeof import('../connectors/report-generator.js') | null = null;
+let brandResearcherModule: typeof import('../agents/brand-researcher/index.js') | null = null;
+
+// Research trigger: /research email@domain.com
+const RESEARCH_TRIGGER = /^\/research\s+(\S+@\S+\.\S+)/i;
+
+// Diagnosis trigger: "diagnostico para @handle" or "analiza @handle" or "/diagnose @handle"
+const DIAGNOSIS_TRIGGER = /(?:diagn[oó]stic[oa]|an[aá]li[sz][aei]s?|investiga|research).*?@(\w[\w._]{1,30}\w)/i;
+
+// Engine trigger patterns
+const ENGINE_TRIGGERS = [
+  /jarvis\s+genera\s+contenido/i,
+  /\/engine/i,
+  /daily\s+report/i,
+  /genera\s+reporte\s+diario/i,
+  /motor\s+de\s+contenido/i,
+  /content\s+engine/i,
+];
+
+const log = agentLogger('router');
+
+// Agents that extend BaseAgent
+const baseAgents = {
+  core: coreAgent,
+  memory: memoryAgent,
+  content: contentAgent,
+  ops: opsAgent,
+} as const;
+
+// URL regex to detect social media links in messages
+const URL_REGEX = /https?:\/\/[^\s]+/gi;
+
+// Role-based agent restrictions: roles not listed here have full access
+const ROLE_ALLOWED_AGENTS: Partial<Record<string, string[]>> = {
+  community: ['analyst'], // Diana: solo análisis de contenido
+  readonly: [],           // Sin acceso a agentes
+};
+
+// Agents blocked per role (checked during routing)
+const ROLE_BLOCKED_AGENTS: Partial<Record<string, string[]>> = {
+  ops: ['memory'],  // Brian: todo excepto Obsidian/memoria
+};
+
+export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallback): Promise<AgentResponse> {
+  // === Role-based access control ===
+  const allowedAgents = ROLE_ALLOWED_AGENTS[req.member.role];
+  if (allowedAgents !== undefined && allowedAgents.length === 0) {
+    return { text: 'Tu rol no tiene acceso a Jarvis en este momento.' };
+  }
+
+  // === Pre-routing: Detect social media URLs ===
+  const messageText = req.message.text || '';
+  log.info({ messageText: messageText?.slice(0, 200) }, 'Router checking message');
+
+  const urls = messageText.match(URL_REGEX) || [];
+  const socialUrl = urls.find(url => isSocialMediaUrl(url));
+
+  // === Pre-routing: Check if user has pending analyst session (waiting for A/B response) ===
+  if (hasAnalystSession(req.message.from)) {
+    log.info({ from: req.message.from }, 'User has pending analyst session, routing response to analyst');
+    const analystReq: AgentRequest = { ...req, agent: 'analyst' };
+    const response = await analystAgent.handle(analystReq, onProgress);
+    storeInteraction(req, response, 'analyst').catch(() => {});
+    return response;
+  }
+
+  if (socialUrl) {
+    log.info({ url: socialUrl }, 'Social media URL detected, routing to analyst');
+
+    if (onProgress) {
+      await onProgress('🔗 Link de red social detectado → Agente Analista activado').catch(() => {});
+    }
+
+    const analystReq: AgentRequest = {
+      ...req,
+      agent: 'analyst',
+      intent: `URL detectada: ${socialUrl}`,
+    };
+
+    const response = await analystAgent.handle(analystReq, onProgress);
+    storeInteraction(req, response, 'analyst').catch(() => {});
+    return response;
+  }
+
+  // === Pre-routing: Check for /research command ===
+  const researchMatch = messageText.match(RESEARCH_TRIGGER);
+  if (researchMatch) {
+    const email = researchMatch[1];
+    log.info({ email }, '/research command detected');
+
+    if (onProgress) {
+      await onProgress('🔬 Iniciando investigación de marca...').catch(() => {});
+    }
+
+    try {
+      if (!brandResearcherModule) {
+        brandResearcherModule = await import('../agents/brand-researcher/index.js');
+      }
+      const reply = await brandResearcherModule.researchByEmail(email);
+      return { text: reply };
+    } catch (error: any) {
+      log.error({ error: error.message }, '/research command failed');
+      return { text: `❌ Error iniciando investigación: ${error.message}` };
+    }
+  }
+
+  // === Pre-routing: Check for brand diagnosis by @handle ===
+  const diagnosisMatch = messageText.match(DIAGNOSIS_TRIGGER);
+  if (diagnosisMatch && req.member.role === 'owner') {
+    const handle = diagnosisMatch[1];
+    log.info({ handle }, 'Brand diagnosis by @handle detected');
+
+    if (onProgress) {
+      await onProgress('🔬 Iniciando diagnostico de marca...').catch(() => {});
+    }
+
+    try {
+      if (!brandResearcherModule) {
+        brandResearcherModule = await import("../agents/brand-researcher/index.js");
+      }
+      const reply = await brandResearcherModule.researchByHandle(handle);
+      return { text: reply };
+    } catch (error: any) {
+      log.error({ error: error.message }, 'Brand diagnosis by handle failed');
+      return { text: `❌ Error iniciando diagnóstico: ${error.message}` };
+    }
+  }
+
+  // === Role restriction: community users can only use analyst ===
+  if (allowedAgents && !allowedAgents.includes('all')) {
+    // If we got here, the message wasn't a social media URL or pending analyst session
+    return {
+      text: `Hola ${req.member.name} 👋 Por ahora tienes acceso al análisis de contenido. Envíame un link de Instagram, TikTok, YouTube o cualquier red social y te hago un análisis completo.`,
+    };
+  }
+
+  // === Pre-routing: Check for engine trigger ===
+  if (ENGINE_TRIGGERS.some(re => re.test(messageText))) {
+    log.info('Engine trigger detected, running daily content engine');
+
+    if (onProgress) {
+      await onProgress('🚀 Motor de Contenido Diario activado...').catch(() => {});
+    }
+
+    try {
+      if (!engineModule) {
+        engineModule = await import('../agents/engine/index.js');
+      }
+      if (!reportModule) {
+        reportModule = await import('../connectors/report-generator.js');
+      }
+
+      const report = await engineModule.runDailyContentEngine((msg) => {
+        onProgress?.(msg);
+      });
+
+      // Post to web app
+      await reportModule.postDailyReport(report).catch(() => {});
+
+      // Save to Obsidian
+      try {
+        const date = report.date;
+        const md = reportModule.formatReportMarkdown(report);
+        const axios = (await import('axios')).default;
+        const { config: cfg } = await import('../shared/config.js');
+        const couchUrl = cfg.couchdb.url || 'http://couchdb:5984';
+        const obsidianDb = process.env.OBSIDIAN_DB || 'obsidian-vault';
+        const docId = `jarvis_daily-engine_${date}.md`.replace(/\//g, '_');
+        const auth = cfg.couchdb.user
+          ? { Authorization: `Basic ${Buffer.from(`${cfg.couchdb.user}:${cfg.couchdb.pass}`).toString('base64')}` }
+          : {};
+
+        let rev: string | undefined;
+        try {
+          const existing = await axios.get(`${couchUrl}/${obsidianDb}/${encodeURIComponent(docId)}`, { headers: { ...auth } });
+          rev = existing.data._rev;
+        } catch { /* doc doesn't exist */ }
+
+        const doc: Record<string, unknown> = {
+          _id: docId,
+          path: `jarvis/daily-engine/${date}.md`,
+          content: md,
+          updatedAt: new Date().toISOString(),
+        };
+        if (rev) doc._rev = rev;
+
+        await axios.put(`${couchUrl}/${obsidianDb}/${encodeURIComponent(docId)}`, doc, {
+          headers: { 'Content-Type': 'application/json', ...auth },
+        });
+      } catch { /* Obsidian save failed, non-critical */ }
+
+      // Return WhatsApp summary
+      const summary = reportModule.formatWhatsAppSummary(report);
+      return { text: summary };
+    } catch (error: any) {
+      log.error({ error: error.message }, 'Engine execution failed');
+      return { text: `❌ Error ejecutando el motor de contenido: ${error.message}` };
+    }
+  }
+
+  // === Pre-routing: Log matched skills for debugging ===
+  const matched = matchSkills(messageText);
+  if (matched.length) {
+    log.info(
+      { skills: matched.map(s => s.name) },
+      'Skills detected — will be injected into specialist agent',
+    );
+  }
+
+  // === Standard routing via Core Agent ===
+  const coreResponse = await coreAgent.handle(req, onProgress);
+
+  // Parse routing from response
+  const routeMatch = coreResponse.text.match(/\[ROUTE:(\w+)\]/);
+  if (routeMatch) {
+    const targetAgent = routeMatch[1] as AgentName;
+    if (targetAgent in baseAgents && targetAgent !== 'core') {
+      // Check if this agent is blocked for the user's role
+      const blockedAgents = ROLE_BLOCKED_AGENTS[req.member.role];
+      if (blockedAgents?.includes(targetAgent)) {
+        log.info({ from: req.member.name, blocked: targetAgent, role: req.member.role }, 'Agent blocked for role');
+        return { text: `Lo siento ${req.member.name}, no tienes acceso a esa funcionalidad. Si necesitas algo de ahí, pídele a Alexander.` };
+      }
+
+      log.info({ from: 'core', to: targetAgent }, 'Routing to specialist agent');
+
+      if (onProgress) {
+        const names: Record<string, string> = {
+          memory: '💾 Delegando al Agente de Memoria...',
+          content: '✍️ Delegando al Agente de Contenido...',
+          ops: '⚙️ Delegando al Agente de Operaciones...',
+          analyst: '🔬 Delegando al Agente Analista...',
+        };
+        await onProgress(names[targetAgent] || '🔀 Delegando...').catch(() => {});
+      }
+
+      const specialistReq: AgentRequest = {
+        ...req,
+        agent: targetAgent,
+        intent: coreResponse.text.replace(/\[ROUTE:\w+\]/, '').trim(),
+      };
+
+      const agent = baseAgents[targetAgent as keyof typeof baseAgents];
+      const specialistResponse = await agent.handle(specialistReq, onProgress);
+      storeInteraction(req, specialistResponse, targetAgent).catch(() => {});
+      return specialistResponse;
+    }
+  }
+
+  // Core handled it directly
+  storeInteraction(req, coreResponse, 'core').catch(() => {});
+  return coreResponse;
+}
+
+async function storeInteraction(
+  req: AgentRequest,
+  res: AgentResponse,
+  handledBy: AgentName
+): Promise<void> {
+  try {
+    await memoryAgent.handle({
+      agent: 'memory',
+      message: {
+        ...req.message,
+        text: `[AUTO-LOG] ${req.member.name}: "${req.message.text?.slice(0, 200)}" → handled by ${handledBy}`,
+        type: 'text',
+      },
+      member: req.member,
+      intent: 'store_interaction',
+    });
+  } catch {
+    // Non-critical, ignore
+  }
+}

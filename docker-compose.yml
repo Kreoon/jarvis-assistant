@@ -1,14 +1,37 @@
 services:
   jarvis:
     build: .
-    container_name: jarvis
+    container_name: jarvis-v2
     restart: unless-stopped
     env_file:
       - .env
     volumes:
       - ./vault:/app/vault
+      - ./data:/app/data
+      - ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - ~/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+    depends_on:
+      - couchdb
     networks:
       - caddy-network
+
+  couchdb:
+    image: couchdb:3
+    container_name: jarvis-couchdb
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: KreoonSync2024!
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+      - ./couchdb-init.ini:/opt/couchdb/etc/local.d/livesync.ini
+    ports:
+      - '5984:5984'
+    networks:
+      - caddy-network
+
+volumes:
+  couchdb_data:
 
 networks:
   caddy-network:
