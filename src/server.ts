@@ -343,6 +343,347 @@ app.get('/audio/:filename', (req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
+// === Serve audio files ===
+app.get('/audio/:filename', (req, res) => {
+  const fp = '/app/data/tmp/' + req.params.filename;
+  if (!fs.existsSync(fp)) return res.status(404).send('not found');
+  res.setHeader('Content-Type', 'audio/mpeg');
+  fs.createReadStream(fp).pipe(res);
+});
+
+// === Serve daily briefing reports as HTML ===
+app.get('/report/:id', (req, res) => {
+  const fp = `/app/data/reports/${req.params.id}.json`;
+  if (!fs.existsSync(fp)) return res.status(404).send(`<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Not Found</title>
+<style>body{font-family:system-ui;background:#000810;color:#00e5ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}h1{font-size:1.2rem;letter-spacing:0.3em;text-transform:uppercase;opacity:0.6}</style>
+</head><body><h1>Reporte no encontrado</h1></body></html>`);
+
+  let report: any;
+  try {
+    report = JSON.parse(fs.readFileSync(fp, 'utf8'));
+  } catch {
+    return res.status(500).send('<h1>Error leyendo reporte</h1>');
+  }
+
+  const ideas = report.ideas || [];
+
+  // Helper: safely get videoScript (handle string, nested object, or missing)
+  function getScript(idea: any): any {
+    let s = idea.videoScript || idea.video_script || idea.script || {};
+    if (typeof s === 'string') {
+      try { s = JSON.parse(s); } catch { s = { voiceScript: s }; }
+    }
+    return s;
+  }
+
+  // Helper: escape HTML
+  function esc(str: any): string {
+    if (!str || typeof str !== 'string') return '-';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  const scriptsHtml = ideas.map((idea: any, i: number) => {
+    const s = getScript(idea);
+    const hook = s.hook || idea.hook || '';
+    const voiceScript = s.voiceScript || s.voice_script || s.script || '';
+    const visualScript = s.visualScript || s.visual_script || s.visual || '';
+    const editingScript = s.editingScript || s.editing_script || s.editing || '';
+    const caption = s.caption || idea.caption || '';
+    const hashtags = s.hashtags || idea.hashtags || '';
+    const cta = s.cta || idea.cta || '';
+    const duration = s.duration || idea.duration || '60s';
+    const platform = idea.platform || '';
+    const viralScore = idea.viralScore ?? idea.viral_score ?? '?';
+
+    return `
+      <div class="card">
+        <div class="card-header">
+          <span class="num">${i + 1}</span>
+          <div class="card-title">
+            <h2>${esc(idea.title || 'Sin titulo')}</h2>
+            <div class="meta">
+              <span class="tag platform">${esc(platform)}</span>
+              <span class="tag">${esc(duration)}</span>
+              <span class="tag viral">Viral: ${viralScore}/10</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hook">${esc(hook)}</div>
+
+        <div class="info-row">
+          <div class="info-item"><span class="info-label">Angulo</span>${esc(idea.angle)}</div>
+          <div class="info-item"><span class="info-label">Por que hoy</span>${esc(idea.whyToday || idea.why_today)}</div>
+        </div>
+
+        <div class="sections">
+          <details open>
+            <summary><span class="icon">🎙</span> Guion de Voz</summary>
+            <div class="section-content"><pre>${esc(voiceScript)}</pre></div>
+          </details>
+          <details>
+            <summary><span class="icon">🎬</span> Guion Visual</summary>
+            <div class="section-content"><pre>${esc(visualScript)}</pre></div>
+          </details>
+          <details>
+            <summary><span class="icon">✂️</span> Guion de Edicion</summary>
+            <div class="section-content"><pre>${esc(editingScript)}</pre></div>
+          </details>
+          <details>
+            <summary><span class="icon">📝</span> Caption</summary>
+            <div class="section-content"><pre>${esc(caption)}</pre></div>
+          </details>
+          ${hashtags && hashtags !== '-' ? `
+          <div class="hashtags">${esc(hashtags)}</div>` : ''}
+          ${cta && cta !== '-' ? `
+          <div class="cta-box"><strong>CTA:</strong> ${esc(cta)}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Email/trends summary
+  const emailSummary = report.emailSummary || report.email_summary || '';
+  const webTrends = report.webTrends || report.web_trends || '';
+
+  const summaryHtml = (emailSummary || webTrends) ? `
+    <div class="summary-section">
+      ${emailSummary ? `
+      <div class="summary-block">
+        <h3>Newsletters del dia</h3>
+        <pre>${esc(emailSummary)}</pre>
+      </div>` : ''}
+      ${webTrends ? `
+      <div class="summary-block">
+        <h3>Tendencias detectadas</h3>
+        <pre>${esc(webTrends)}</pre>
+      </div>` : ''}
+    </div>` : '';
+
+  res.send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily Briefing — ${report.date} — Jarvis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Share Tech Mono', monospace;
+      background: #000810;
+      color: #b0d4e8;
+      padding: 0;
+      min-height: 100vh;
+      background-image:
+        radial-gradient(circle at 50% 0%, rgba(0,119,255,0.08) 0%, transparent 60%),
+        linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+      background-size: 100% 100%, 40px 40px, 40px 40px;
+    }
+
+    .container { max-width: 820px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* Header */
+    .header {
+      border: 1px solid rgba(0,229,255,0.15);
+      background: rgba(0,20,40,0.6);
+      backdrop-filter: blur(8px);
+      padding: 24px 28px;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    .header::before, .header::after { content: ''; position: absolute; width: 12px; height: 12px; border-color: #00e5ff; border-style: solid; }
+    .header::before { top: 0; left: 0; border-width: 2px 0 0 2px; }
+    .header::after { top: 0; right: 0; border-width: 2px 2px 0 0; }
+    .header h1 {
+      font-size: 1.3rem;
+      color: #00e5ff;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      text-shadow: 0 0 15px rgba(0,229,255,0.4);
+      margin-bottom: 6px;
+    }
+    .header .subtitle {
+      color: rgba(0,229,255,0.4);
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+    }
+    .jarvis-badge {
+      position: absolute; bottom: 0; right: 0;
+      background: rgba(0,229,255,0.08);
+      border-left: 1px solid rgba(0,229,255,0.15);
+      border-top: 1px solid rgba(0,229,255,0.15);
+      padding: 6px 14px;
+      font-size: 0.6rem;
+      color: rgba(0,229,255,0.5);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    /* Summary blocks */
+    .summary-section { margin-bottom: 24px; }
+    .summary-block {
+      border: 1px solid rgba(0,229,255,0.1);
+      background: rgba(0,20,40,0.4);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+    }
+    .summary-block h3 {
+      font-size: 0.7rem;
+      color: rgba(0,229,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      margin-bottom: 10px;
+    }
+    .summary-block pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-size: 0.82rem;
+      line-height: 1.65;
+      color: #8ab4c8;
+    }
+
+    /* Script cards */
+    .card {
+      border: 1px solid rgba(0,229,255,0.12);
+      background: rgba(0,20,40,0.5);
+      backdrop-filter: blur(6px);
+      margin-bottom: 20px;
+      padding: 20px 24px;
+      position: relative;
+      transition: border-color 0.3s;
+    }
+    .card:hover { border-color: rgba(0,229,255,0.3); }
+    .card-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+    .num {
+      background: rgba(0,229,255,0.12);
+      border: 1px solid rgba(0,229,255,0.3);
+      color: #00e5ff;
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 1rem;
+      flex-shrink: 0;
+      text-shadow: 0 0 8px rgba(0,229,255,0.5);
+    }
+    .card-title h2 { font-size: 1rem; color: #fff; letter-spacing: 0.02em; margin-bottom: 6px; }
+    .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tag {
+      display: inline-block;
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border: 1px solid rgba(0,229,255,0.2);
+      color: rgba(0,229,255,0.6);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .tag.platform { background: rgba(0,229,255,0.08); color: #00e5ff; }
+    .tag.viral { border-color: rgba(255,200,0,0.3); color: rgba(255,200,0,0.7); }
+
+    /* Hook */
+    .hook {
+      background: rgba(0,229,255,0.04);
+      border-left: 3px solid #00e5ff;
+      padding: 14px 18px;
+      font-style: italic;
+      color: #00e5ff;
+      font-size: 0.95rem;
+      margin-bottom: 16px;
+      text-shadow: 0 0 6px rgba(0,229,255,0.2);
+      line-height: 1.5;
+    }
+
+    /* Info row */
+    .info-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    @media (max-width: 600px) { .info-row { grid-template-columns: 1fr; } }
+    .info-item { font-size: 0.82rem; color: #8ab4c8; line-height: 1.5; }
+    .info-label {
+      display: block;
+      font-size: 0.6rem;
+      color: rgba(0,229,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 4px;
+    }
+
+    /* Sections (details) */
+    .sections { margin-top: 8px; }
+    details { margin-top: 8px; border: 1px solid rgba(0,229,255,0.08); overflow: hidden; }
+    summary {
+      padding: 10px 16px;
+      background: rgba(0,229,255,0.04);
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #8ab4c8;
+      letter-spacing: 0.05em;
+      transition: background 0.2s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    summary:hover { background: rgba(0,229,255,0.08); }
+    summary .icon { font-size: 0.9rem; }
+    .section-content { padding: 0; }
+    .section-content pre {
+      padding: 16px 20px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-size: 0.82rem;
+      line-height: 1.7;
+      color: #8ab4c8;
+      background: rgba(0,0,0,0.3);
+      border-top: 1px solid rgba(0,229,255,0.05);
+    }
+
+    /* Hashtags + CTA */
+    .hashtags {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: rgba(0,229,255,0.03);
+      border: 1px solid rgba(0,229,255,0.08);
+      font-size: 0.78rem;
+      color: rgba(0,229,255,0.5);
+      line-height: 1.6;
+      word-wrap: break-word;
+    }
+    .cta-box {
+      margin-top: 8px;
+      padding: 10px 14px;
+      border: 1px solid rgba(255,200,0,0.15);
+      background: rgba(255,200,0,0.03);
+      font-size: 0.8rem;
+      color: rgba(255,200,0,0.7);
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      color: rgba(0,229,255,0.2);
+      font-size: 0.65rem;
+      margin-top: 40px;
+      padding: 20px 0;
+      border-top: 1px solid rgba(0,229,255,0.08);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Daily Briefing — ${report.date}</h1>
+      <p class="subtitle">${ideas.length} guiones | ${(report.accountsScanned || []).length} cuentas escaneadas | ${report.generatedAt || ''}</p>
+      <div class="jarvis-badge">Jarvis Intelligence Engine</div>
+    </div>
+    ${summaryHtml}
+    ${scriptsHtml}
+    <div class="footer">Jarvis AI | Alexander Cast | Kreoon</div>
+  </div>
+</body>
+</html>`);
+});
+
 // === Health check ===
 app.get('/health', (_req, res) => {
   res.json({
