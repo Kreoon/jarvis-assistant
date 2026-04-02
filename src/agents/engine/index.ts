@@ -1,144 +1,234 @@
 import { callLLM } from '../../core/llm.js';
-import { searchEmails, readEmailFull } from '../../shared/google-api.js';
+import { searchEmails, readEmailFull, listAccounts } from '../../shared/google-api.js';
 import { searchWeb } from '../../shared/perplexity.js';
 import { config } from '../../shared/config.js';
 import { logger } from '../../shared/logger.js';
 import { loadSkillContent } from '../../core/skill-loader.js';
-import type { DailyReport, ContentIdea, ReelStructure } from '../../shared/types.js';
+import { generateSpeech } from '../../connectors/tts.js';
+import { sendMedia, sendText } from '../../connectors/whatsapp.js';
+import type { DailyReport, ContentIdea, VideoScript } from '../../shared/types.js';
 
 type ProgressFn = (msg: string) => void;
+
+const OWNER_PHONE = config.dailyEngine.ownerPhone;
 
 // ─── Main Pipeline ───────────────────────────────────────────────────────────
 
 export async function runDailyContentEngine(
   onProgress?: ProgressFn,
+  requestPhone?: string,
 ): Promise<DailyReport> {
   const date = new Date().toISOString().split('T')[0];
+  const phone = requestPhone || OWNER_PHONE;
   const log = (msg: string) => {
     logger.info({ engine: true }, msg);
     onProgress?.(msg);
   };
 
-  log('📧 Paso 1/5: Escaneando emails relevantes...');
-  const emailSummary = await scanEmails();
+  log('Leyendo los emails de hoy...');
+  const { emailSummary, accountsScanned } = await scanAllEmails();
 
-  log('🌐 Paso 2/5: Buscando tendencias web...');
+  log('Buscando qué está pasando en el mundo...');
   const webTrends = await searchTrends();
 
-  log('💡 Paso 3/5: Generando ideas de contenido...');
-  const ideas = await generateIdeas(emailSummary, webTrends);
+  // ─── Voice Update: Audio summary of what's new ──────────────────────────
+  log('Preparando el update de voz...');
+  await sendVoiceUpdate(emailSummary, webTrends, date, phone);
 
-  log('🎬 Paso 4/5: Generando estructura completa por idea...');
-  const fullIdeas = await generateStructures(ideas);
+  log('Eligiendo los mejores temas...');
+  const ideas = await selectTopIdeas(emailSummary, webTrends);
 
-  log('📊 Paso 5/5: Compilando reporte...');
+  log('Escribiendo los guiones...');
+  const fullIdeas = await generateVideoScripts(ideas);
+
+  log('Armando el reporte...');
   const report: DailyReport = {
     date,
     emailSummary,
     webTrends,
     ideas: fullIdeas,
     generatedAt: new Date().toISOString(),
+    accountsScanned,
   };
 
-  log(`✅ Reporte completo: ${fullIdeas.length} ideas con estructura de 5 perspectivas`);
+  log(`Listo, ${fullIdeas.length} guiones listos para grabar`);
 
   return report;
 }
 
-// ─── Step 1: Scan Emails ─────────────────────────────────────────────────────
+// ─── Voice Update via ElevenLabs ────────────────────────────────────────────
 
-async function scanEmails(): Promise<string> {
-  const brands = config.dailyEngine.brands;
-  const query = brands.map(b => `"${b}"`).join(' OR ') + ' newer_than:1d';
+async function sendVoiceUpdate(
+  emailSummary: string,
+  webTrends: string,
+  date: string,
+  phone: string,
+): Promise<void> {
+  try {
+    // Generate a conversational summary for TTS
+    const voiceResponse = await callLLM(
+      [
+        {
+          role: 'system',
+          content: `Eres Jarvis, el asistente de Alexander Cast. Vas a grabar un audio de WhatsApp de máximo 45 segundos.
+
+Estilo: Como un parcero que te cuenta las noticias del día tomando café. Natural, directo, con energía pero sin gritar. Colombiano.
+
+Estructura:
+1. Saludo rápido (3s): "Quiubo Alex, te cuento lo de hoy..."
+2. Top 3-4 nuggets más importantes (30s): Los datos más impactantes de emails y tendencias
+3. Cierre (5s): "Ya te tengo los guiones listos, revísalos"
+
+REGLAS:
+- NO uses formato markdown, bullets, ni asteriscos — esto se va a LEER EN VOZ ALTA
+- Usa lenguaje hablado natural, con conectores ("mira que...", "otra cosa...", "y lo más loco es que...")
+- Menciona datos específicos (números, nombres, herramientas)
+- Máximo 400 caracteres para que quede en ~45 segundos`,
+        },
+        {
+          role: 'user',
+          content: `Fecha: ${date}\n\nNUGGETS DE EMAILS:\n${emailSummary.slice(0, 1500)}\n\nTENDENCIAS WEB:\n${webTrends.slice(0, 1500)}\n\nGenera el texto para el audio. Solo el texto, nada más.`,
+        },
+      ],
+      { provider: 'gemini', maxTokens: 500 },
+    );
+
+    const voiceText = voiceResponse.text?.trim();
+    if (!voiceText) return;
+
+    // Generate audio with ElevenLabs
+    const audio = await generateSpeech(voiceText, `jarvis-briefing-${date}.mp3`);
+
+    if (audio?.url) {
+      // Send audio message via WhatsApp
+      await sendMedia(phone, {
+        type: 'audio',
+        url: audio.url,
+        mimeType: 'audio/mpeg',
+      });
+      logger.info({ phone }, 'Voice briefing sent via WhatsApp');
+    } else {
+      // Fallback: send as text if TTS fails
+      await sendText(phone, voiceText);
+      logger.warn('TTS failed, sent voice update as text');
+    }
+  } catch (error: any) {
+    logger.warn({ error: error.message }, 'Voice update failed, continuing with scripts');
+  }
+}
+
+// ─── Step 1: Scan ALL email accounts ────────────────────────────────────────
+
+async function scanAllEmails(): Promise<{ emailSummary: string; accountsScanned: string[] }> {
+  const topics = config.dailyEngine.topics;
+  const query = topics.map(t => `"${t}"`).join(' OR ') + ' newer_than:1d';
 
   try {
-    // Scan both accounts in parallel
-    const [founderEmails, opsEmails] = await Promise.allSettled([
-      searchEmails(query, 15, 'founder'),
-      searchEmails(query, 15, 'ops'),
-    ]);
+    const accounts = listAccounts();
+    const accountKeys = Object.keys(accounts);
 
-    const allEmails = [
-      ...(founderEmails.status === 'fulfilled' ? founderEmails.value : []),
-      ...(opsEmails.status === 'fulfilled' ? opsEmails.value : []),
-    ];
-
-    if (allEmails.length === 0) {
-      return 'Sin emails relevantes en las últimas 24 horas.';
+    if (accountKeys.length === 0) {
+      return { emailSummary: 'No hay cuentas Google conectadas.', accountsScanned: [] };
     }
 
-    // Read full content of top 5 most relevant
-    const topEmails = allEmails.slice(0, 5);
+    const scanResults = await Promise.allSettled(
+      accountKeys.map(key => searchEmails(query, 10, key).then(emails => ({ key, emails }))),
+    );
+
+    const allEmails: { id: string; from: string; subject: string; snippet: string; account: string }[] = [];
+    const scannedAccounts: string[] = [];
+
+    for (const result of scanResults) {
+      if (result.status === 'fulfilled') {
+        scannedAccounts.push(result.value.key);
+        for (const email of result.value.emails) {
+          allEmails.push({ ...email, account: result.value.key });
+        }
+      }
+    }
+
+    if (allEmails.length === 0) {
+      return { emailSummary: 'Sin newsletters relevantes hoy.', accountsScanned: scannedAccounts };
+    }
+
+    const topEmails = allEmails.slice(0, 10);
     const fullContents = await Promise.allSettled(
-      topEmails.map(e => readEmailFull(e.id, 'founder').catch(() => readEmailFull(e.id, 'ops'))),
+      topEmails.map(e => readEmailFull(e.id, e.account)),
     );
 
     const emailData = fullContents
       .filter(r => r.status === 'fulfilled')
       .map(r => (r as PromiseFulfilledResult<Awaited<ReturnType<typeof readEmailFull>>>).value)
-      .map(e => `From: ${e.from}\nSubject: ${e.subject}\nDate: ${e.date}\nBody: ${e.body.slice(0, 500)}`)
+      .map(e => `From: ${e.from}\nSubject: ${e.subject}\nDate: ${e.date}\nBody: ${e.body.slice(0, 800)}`)
       .join('\n---\n');
 
-    // Use Gemini Flash (cheap) to filter and summarize
     const filterResponse = await callLLM(
       [
         {
           role: 'system',
-          content: 'Eres un asistente que filtra emails relevantes para una agencia de contenido UGC en Colombia. Responde en español.',
+          content: `Eres un curador de información para Alexander Cast, experto en Estrategia Digital, IA y Contenido.
+
+Extrae los NUGGETS más valiosos — datos específicos, estadísticas, noticias de impacto, herramientas nuevas, predicciones.
+
+FILTRA SOLO lo útil para crear contenido viral sobre: IA, tecnología, negocios, emprendimiento, automatización, estrategia digital, motivación.
+
+IGNORA: promociones, spam, transaccionales.
+
+Formato: 5-10 nuggets con el DATO CONCRETO y relevancia. Español.`,
         },
-        {
-          role: 'user',
-          content: `Estos son emails recientes. Filtra cuáles son relevantes para generar ideas de contenido (noticias de la industria, oportunidades de negocio, tendencias, comunicaciones de clientes). Resume cada uno en 1-2 líneas.\n\n${emailData}`,
-        },
+        { role: 'user', content: emailData },
       ],
-      { provider: 'gemini', maxTokens: 1500 },
+      { provider: 'gemini', maxTokens: 2000 },
     );
 
-    return filterResponse.text || 'Sin emails relevantes procesados.';
+    return {
+      emailSummary: filterResponse.text || 'Sin nuggets relevantes hoy.',
+      accountsScanned: scannedAccounts,
+    };
   } catch (error: any) {
     logger.warn({ error: error.message }, 'Email scan failed');
-    return `Error escaneando emails: ${error.message}`;
+    return { emailSummary: `Error escaneando emails: ${error.message}`, accountsScanned: [] };
   }
 }
 
-// ─── Step 2: Search Web Trends ───────────────────────────────────────────────
+// ─── Step 2: Search Web Trends ──────────────────────────────────────────────
 
 async function searchTrends(): Promise<string> {
   const queries = [
-    'tendencias contenido digital Colombia hoy',
-    'viral reels trends Instagram TikTok this week',
-    'UGC marketing news Latin America',
-    'novedades marketing digital creadores',
+    'AI artificial intelligence news today breakthroughs tools',
+    'tendencias tecnología emprendimiento negocios hoy',
+    'automatización negocios herramientas IA nuevas 2026',
+    'viral content trends social media creators this week',
+    'motivación emprendedores startups latinoamérica',
   ];
 
   try {
-    const results = await Promise.allSettled(
-      queries.map(q => searchWeb(q)),
-    );
-
+    const results = await Promise.allSettled(queries.map(q => searchWeb(q)));
     const successful = results
       .filter(r => r.status === 'fulfilled')
       .map(r => (r as PromiseFulfilledResult<{ result: string; citations: string[] }>).value);
 
-    if (successful.length === 0) {
-      return 'No se pudieron obtener tendencias web.';
-    }
+    if (successful.length === 0) return 'No se pudieron obtener tendencias web.';
 
     const combined = successful.map(r => r.result).join('\n\n---\n\n');
 
-    // Consolidate and deduplicate with Gemini Flash
     const consolidation = await callLLM(
       [
         {
           role: 'system',
-          content: 'Consolida y deduplica estas búsquedas de tendencias web. Extrae los 5-8 insights más relevantes para una agencia UGC/contenido digital en LATAM. Responde en español, formato bullet points.',
+          content: `Eres el radar de tendencias de Alexander Cast (Estrategia Digital, IA, Contenido).
+
+Extrae los 5-8 insights MÁS POTENTES para contenido viral:
+- Noticias de IA impactantes
+- Herramientas que cambian el juego
+- Datos/estadísticas impactantes
+- Tendencias de negocio emergentes
+
+Para cada uno: DATO CONCRETO + por qué importa a emprendedores/marketers/creadores. Español, bullets.`,
         },
-        {
-          role: 'user',
-          content: combined.slice(0, 8000),
-        },
+        { role: 'user', content: combined.slice(0, 8000) },
       ],
-      { provider: 'gemini', maxTokens: 1500 },
+      { provider: 'gemini', maxTokens: 2000 },
     );
 
     return consolidation.text || 'Tendencias procesadas sin resumen.';
@@ -148,210 +238,182 @@ async function searchTrends(): Promise<string> {
   }
 }
 
-// ─── Step 3: Generate Ideas ──────────────────────────────────────────────────
+// ─── Step 3: Select Top 3 Ideas ─────────────────────────────────────────────
 
-async function generateIdeas(
-  emailSummary: string,
-  webTrends: string,
-): Promise<ContentIdea[]> {
+async function selectTopIdeas(emailSummary: string, webTrends: string): Promise<ContentIdea[]> {
   const maxIdeas = config.dailyEngine.maxIdeas;
-
-  // Load relevant skills
-  const skillContent = loadSkillsForEngine([
-    'skill_viralidad_redes',
-    'skill_estrategia_contenido',
-    'skill_neuroventas',
-  ]);
 
   const response = await callLLM(
     [
       {
         role: 'system',
-        content: `Eres un estratega de contenido digital para Kreoon, agencia UGC en Colombia.
-Genera exactamente ${maxIdeas} ideas de contenido basadas en los datos proporcionados.
+        content: `Eres el estratega de Alexander Cast — experto en Estrategia Digital, IA y Contenido.
 
-${skillContent}
+Selecciona los ${maxIdeas} MEJORES temas para videos virales HOY.
 
-RESPONDE EXCLUSIVAMENTE en formato JSON array. Cada idea debe tener:
-{
-  "title": "Título corto y punchy",
-  "angle": "Ángulo específico para este contenido",
-  "relevance": "Por qué es relevante HOY (referencia a email/tendencia)",
+Criterios:
+1. VIRALIDAD: ¿Genera curiosidad, debate, o "wow"?
+2. RELEVANCIA: ¿Conecta con emprendedores, marketers, creadores?
+3. ÁNGULO ÚNICO: ¿Alexander puede dar perspectiva experta?
+4. URGENCIA: ¿Mejor hoy que mañana?
+
+JSON array:
+[{
+  "title": "Título clickeable (máx 10 palabras)",
+  "angle": "Perspectiva experta de Alexander",
+  "whyToday": "Por qué es relevante HOY",
   "platform": "instagram|tiktok|youtube|linkedin",
-  "funnelPosition": "TOFU|MOFU|BOFU",
-  "contentPillar": "educativo|entretenimiento|venta|behind-the-scenes|autoridad"
-}`,
+  "viralScore": 8
+}]`,
       },
       {
         role: 'user',
-        content: `📧 EMAILS RELEVANTES:\n${emailSummary}\n\n🌐 TENDENCIAS WEB:\n${webTrends}\n\nGenera ${maxIdeas} ideas de contenido. Solo JSON array, nada más.`,
+        content: `📧 NEWSLETTERS:\n${emailSummary}\n\n🌐 TENDENCIAS:\n${webTrends}\n\nSelecciona ${maxIdeas} temas. Solo JSON array.`,
       },
     ],
     { provider: 'gemini', maxTokens: 2000, temperature: 0.8 },
   );
 
   try {
-    // Extract JSON from response (handle markdown code blocks)
     let jsonStr = response.text.trim();
     const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim();
-    }
-    // Also try to extract array directly
+    if (jsonMatch) jsonStr = jsonMatch[1].trim();
     const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
-    if (arrayMatch) {
-      jsonStr = arrayMatch[0];
-    }
-
-    const ideas: ContentIdea[] = JSON.parse(jsonStr);
-    return ideas.slice(0, maxIdeas);
-  } catch (error: any) {
-    logger.error({ error: error.message }, 'Failed to parse ideas JSON');
-    // Fallback: return a single generic idea
+    if (arrayMatch) jsonStr = arrayMatch[0];
+    return (JSON.parse(jsonStr) as ContentIdea[]).slice(0, maxIdeas);
+  } catch {
     return [{
-      title: 'Tendencia del día en contenido UGC',
-      angle: 'Resumen de lo más relevante en el mundo UGC hoy',
-      relevance: 'Basado en las tendencias web del día',
+      title: 'Lo que está pasando hoy con la IA',
+      angle: 'Resumen de las noticias más importantes',
+      whyToday: 'Tendencias web del día',
       platform: 'instagram',
-      funnelPosition: 'TOFU',
-      contentPillar: 'educativo',
+      viralScore: 6,
     }];
   }
 }
 
-// ─── Step 4: Generate Structures ─────────────────────────────────────────────
+// ─── Step 4: Generate Video Scripts (3 dimensions) ──────────────────────────
 
-async function generateStructures(
+async function generateVideoScripts(
   ideas: ContentIdea[],
-): Promise<(ContentIdea & { structure: ReelStructure })[]> {
-  // Load all relevant skills for structure generation
+): Promise<(ContentIdea & { videoScript: VideoScript })[]> {
   const skillContent = loadSkillsForEngine([
     'skill_copywriting_avanzado',
     'skill_storytelling_avanzado',
     'skill_humanizer',
-    'skill_creacion_contenido',
     'skill_viralidad_redes',
+    'skill_neuroventas',
+    'skill_creacion_contenido',
   ]);
 
-  const results = await Promise.all(
+  return Promise.all(
     ideas.map(async (idea) => {
       try {
-        const structure = await generateSingleStructure(idea, skillContent);
-        return { ...idea, structure };
+        const videoScript = await generateSingleScript(idea, skillContent);
+        return { ...idea, videoScript };
       } catch (error: any) {
-        logger.error({ idea: idea.title, error: error.message }, 'Failed to generate structure');
-        return { ...idea, structure: getEmptyStructure() };
+        logger.error({ idea: idea.title, error: error.message }, 'Script generation failed');
+        return { ...idea, videoScript: getEmptyScript() };
       }
     }),
   );
-
-  return results;
 }
 
-async function generateSingleStructure(
-  idea: ContentIdea,
-  skillContent: string,
-): Promise<ReelStructure> {
+async function generateSingleScript(idea: ContentIdea, skillContent: string): Promise<VideoScript> {
   const response = await callLLM(
     [
       {
         role: 'system',
-        content: `Eres un equipo completo de producción de contenido UGC para Kreoon (agencia en Colombia).
-Para la idea dada, genera la estructura completa desde 5 perspectivas profesionales.
+        content: `Eres el equipo creativo de Alexander Cast para videos virales DOPAMÍNICOS.
+
+ALEXANDER CAST: Experto en Estrategia Digital, IA y Contenido. Colombiano, directo, datos duros + opinión fuerte. Su audiencia: emprendedores, marketers, creadores.
+
+Genera un guión con 3 DIMENSIONES separadas:
+
+1. **GUIÓN DE VOZ** (voiceScript): Lo que Alexander DICE palabra por palabra.
+   - Hook de 3 segundos IRRESISTIBLE
+   - Estructura: Hook → Contexto rápido → Dato 1 → Dato 2 → Opinión personal → CTA
+   - Con marcadores de tiempo [0:00], [0:05], etc.
+   - Tono: como contarle algo increíble a un amigo
+   - Pausas estratégicas marcadas con (...)
+   - Cambios de energía: [ENERGÍA ALTA], [TONO SERIO], [SUSURRO]
+
+2. **GUIÓN VISUAL** (visualScript): Lo que SE VE en pantalla.
+   - Cada escena con tiempo exacto
+   - Encuadres: POV, close-up cara, plano medio, pantalla compartida, B-roll
+   - Movimientos de cámara: zoom in rápido, paneo, estático
+   - Props, fondos, elementos visuales
+   - Expresiones faciales y lenguaje corporal
+   - Máximo dinamismo: cambio de plano cada 2-3 segundos
+
+3. **GUIÓN DE EDICIÓN** (editingScript): Instrucciones para el editor.
+   - Cortes y transiciones (jump cuts, zoom cuts, whip pan)
+   - Text overlays: texto exacto + timing + posición + animación
+   - Efectos de sonido: woosh, pop, ding, bass drop
+   - Música de fondo: estilo, BPM, momentos clave
+   - Efectos visuales: shake, flash, slow-mo, speed ramp
+   - Subtítulos animados: estilo (Alex Hormozi, Mr Beast)
+   - Formato: 9:16, 1080x1920
+
+OBJETIVO: Que cada segundo genere DOPAMINA. Retención del 90%+.
 
 ${skillContent}
 
-RESPONDE EXCLUSIVAMENTE en formato JSON con esta estructura exacta:
+RESPONDE SOLO en JSON:
 {
-  "creator": {
-    "script": "Script completo: hook (3s), desarrollo, CTA. Con marcadores de tiempo.",
-    "timing": "Desglose de tiempo por sección",
-    "deliveryNotes": "Energía, tono, contacto visual, gestos"
-  },
-  "producer": {
-    "shotList": "Lista de planos escena por escena",
-    "transitions": "Transiciones entre escenas",
-    "textOverlays": "Texto exacto + posición + timing de cada overlay",
-    "music": "Género, BPM, trending sounds sugeridos",
-    "specs": "Formato, aspecto, resolución"
-  },
-  "strategist": {
-    "funnelPosition": "Posición en funnel y justificación",
-    "pillar": "Pilar de contenido",
-    "objective": "Objetivo principal y métricas",
-    "kpis": "KPIs específicos a trackear",
-    "schedule": "Mejor día/hora de publicación",
-    "repurposing": "Plan de repurposing a otras plataformas"
-  },
-  "trafficker": {
-    "adScore": 7,
-    "targeting": "Audiencia ideal para paid",
-    "budget": "Rango de presupuesto sugerido",
-    "paidCTA": "CTA optimizado para versión pagada"
-  },
-  "communityManager": {
-    "caption": "Caption completo con hook/body/CTA",
-    "hashtags": "30 hashtags IG + 5 TikTok",
-    "engagement": "Prompts de engagement para comentarios",
-    "replyTemplates": "Templates de respuesta a comentarios",
-    "crossPosting": "Plan de cross-posting"
-  }
+  "hook": "Texto exacto del hook (primeros 3s). IRRESISTIBLE.",
+  "duration": "30s|60s|90s",
+  "voiceScript": "Guión completo de VOZ con marcadores de tiempo y energía",
+  "visualScript": "Guión completo VISUAL escena por escena con encuadres y movimientos",
+  "editingScript": "Instrucciones de EDICIÓN: cortes, overlays, SFX, música, subtítulos",
+  "caption": "Caption completo para la plataforma con hook, cuerpo y CTA",
+  "hashtags": "20 hashtags: 30% grandes, 40% medianos, 30% nicho",
+  "cta": "CTA del video + CTA del caption"
 }`,
       },
       {
         role: 'user',
-        content: `IDEA: ${idea.title}
-ÁNGULO: ${idea.angle}
-PLATAFORMA: ${idea.platform}
-FUNNEL: ${idea.funnelPosition}
-PILAR: ${idea.contentPillar}
-
-Genera la estructura completa. Solo JSON, nada más.`,
+        content: `TEMA: ${idea.title}\nÁNGULO: ${idea.angle}\nPOR QUÉ HOY: ${idea.whyToday}\nPLATAFORMA: ${idea.platform}\nVIRAL SCORE: ${idea.viralScore}/10\n\nEscribe el guión completo con las 3 dimensiones. Solo JSON.`,
       },
     ],
-    {
-      provider: 'claude',
-      maxTokens: 6000,
-      temperature: 0.7,
-    },
+    { provider: 'gemini', maxTokens: 6000, temperature: 0.7 },
   );
 
   try {
     let jsonStr = response.text.trim();
     const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim();
-    }
+    if (jsonMatch) jsonStr = jsonMatch[1].trim();
     const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      jsonStr = objMatch[0];
-    }
-
-    return JSON.parse(jsonStr) as ReelStructure;
+    if (objMatch) jsonStr = objMatch[0];
+    return JSON.parse(jsonStr) as VideoScript;
   } catch {
-    logger.warn({ idea: idea.title }, 'Failed to parse structure JSON, using raw text');
-    // Fallback: wrap raw text
     return {
-      creator: { script: response.text.slice(0, 2000), timing: 'Ver script', deliveryNotes: 'Ver script' },
-      producer: { shotList: 'Ver script', transitions: 'Cortes directos', textOverlays: 'Ver script', music: 'Trending audio', specs: '9:16, 1080x1920' },
-      strategist: { funnelPosition: idea.funnelPosition, pillar: idea.contentPillar, objective: 'Engagement', kpis: 'Views, saves, shares', schedule: 'L-V 7-9AM / 6-8PM', repurposing: 'Stories, carousel' },
-      trafficker: { adScore: 5, targeting: 'Emprendedores 25-40 Colombia', budget: '$5-15 USD/día', paidCTA: 'Descubre más' },
-      communityManager: { caption: 'Ver script', hashtags: '#UGC #ContentCreator #Colombia', engagement: '¿Qué opinan?', replyTemplates: 'Gracias por tu comentario!', crossPosting: 'IG → TikTok → LinkedIn' },
+      hook: idea.title,
+      duration: '60s',
+      voiceScript: response.text.slice(0, 3000),
+      visualScript: 'Ver guión de voz para referencia',
+      editingScript: 'Jump cuts cada 2-3s, subtítulos estilo Hormozi, SFX en datos clave',
+      caption: idea.angle,
+      hashtags: '#IA #EstrategiaDigital #Emprendimiento #AlexanderCast',
+      cta: 'Sígueme para más contenido como este',
     };
   }
 }
 
-function getEmptyStructure(): ReelStructure {
+function getEmptyScript(): VideoScript {
   return {
-    creator: { script: 'Error generando estructura', timing: '-', deliveryNotes: '-' },
-    producer: { shotList: '-', transitions: '-', textOverlays: '-', music: '-', specs: '9:16' },
-    strategist: { funnelPosition: '-', pillar: '-', objective: '-', kpis: '-', schedule: '-', repurposing: '-' },
-    trafficker: { adScore: 0, targeting: '-', budget: '-', paidCTA: '-' },
-    communityManager: { caption: '-', hashtags: '-', engagement: '-', replyTemplates: '-', crossPosting: '-' },
+    hook: 'Error generando guión',
+    duration: '60s',
+    voiceScript: '-',
+    visualScript: '-',
+    editingScript: '-',
+    caption: '-',
+    hashtags: '-',
+    cta: '-',
   };
 }
 
-// ─── Skill Loader Helper ─────────────────────────────────────────────────────
+// ─── Skill Loader Helper ────────────────────────────────────────────────────
 
 function loadSkillsForEngine(skillNames: string[]): string {
   const contents: string[] = [];

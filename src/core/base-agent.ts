@@ -17,50 +17,50 @@ export type ProgressCallback = (message: string) => Promise<void>;
 // Friendly tool names for progress messages
 const TOOL_PROGRESS: Record<string, { start: string; done: string }> = {
   // Analyst
-  extract_content: { start: '📥 Descargando contenido...', done: '✅ Contenido extraído' },
-  analyze_strategy: { start: '🔍 Analizando estrategia (12 dimensiones)...', done: '✅ Análisis completo' },
-  replicate_content: { start: '🔄 Generando 3 versiones de réplica...', done: '✅ Réplicas listas' },
-  generate_pdf: { start: '📄 Generando PDF del reporte...', done: '✅ PDF generado y subido a Drive' },
-  extract_profile: { start: '👤 Extrayendo perfil...', done: '✅ Perfil extraído' },
-  batch_analyze: { start: '📊 Analizando perfil completo...', done: '✅ Análisis batch completo' },
-  download_only: { start: '📥 Descargando y subiendo a Drive...', done: '✅ Guardado en Drive' },
+  extract_content: { start: 'Dale, descargando eso...', done: 'Listo, ya lo tengo' },
+  analyze_strategy: { start: 'Revisando el contenido a fondo...', done: 'Ya lo analicé completo' },
+  replicate_content: { start: 'Armando unas versiones para vos...', done: 'Ahí te van las réplicas' },
+  generate_pdf: { start: 'Montando el PDF...', done: 'PDF listo, ya está en Drive' },
+  extract_profile: { start: 'Mirando ese perfil...', done: 'Ya tengo el perfil' },
+  batch_analyze: { start: 'Analizando todo el perfil, dame un momento...', done: 'Análisis completo parce' },
+  download_only: { start: 'Descargando y guardando en Drive...', done: 'Guardado, listo' },
   // Content
-  web_search: { start: '🌐 Buscando en la web...', done: '✅ Búsqueda completa' },
-  generate_caption: { start: '✍️ Generando caption...', done: '✅ Caption listo' },
-  content_calendar: { start: '📅 Creando calendario...', done: '✅ Calendario listo' },
-  write_copy: { start: '✍️ Escribiendo copy...', done: '✅ Copy listo' },
-  ugc_brief: { start: '📋 Generando brief UGC...', done: '✅ Brief listo' },
+  web_search: { start: 'Buscando info...', done: 'Ya encontré lo que necesitaba' },
+  generate_caption: { start: 'Escribiendo el caption...', done: 'Caption listo' },
+  content_calendar: { start: 'Armando el calendario...', done: 'Calendario listo' },
+  write_copy: { start: 'Escribiendo el copy...', done: 'Copy listo' },
+  ugc_brief: { start: 'Armando el brief...', done: 'Brief listo' },
   // Ops
-  send_email: { start: '📧 Enviando email...', done: '✅ Email enviado' },
-  read_emails: { start: '📧 Leyendo emails...', done: '✅ Emails leídos' },
-  create_calendar_event: { start: '📅 Creando evento...', done: '✅ Evento creado' },
-  list_calendar_events: { start: '📅 Consultando calendario...', done: '✅ Calendario consultado' },
-  check_meta_ads: { start: '📊 Consultando Meta Ads...', done: '✅ Datos de ads obtenidos' },
-  github_action: { start: '🔧 Ejecutando acción en GitHub...', done: '✅ GitHub listo' },
+  send_email: { start: 'Mandando el email...', done: 'Email enviado' },
+  read_emails: { start: 'Revisando los emails...', done: 'Ya los leí' },
+  create_calendar_event: { start: 'Agendando eso...', done: 'Evento creado' },
+  list_calendar_events: { start: 'Mirando la agenda...', done: 'Listo' },
+  check_meta_ads: { start: 'Revisando los ads...', done: 'Ya tengo los datos' },
+  github_action: { start: 'Haciendo eso en GitHub...', done: 'Listo en GitHub' },
   // Memory
-  search_memory: { start: '🔍 Buscando en memoria...', done: '✅ Búsqueda completa' },
-  search_notes: { start: '🔍 Buscando en Obsidian...', done: '✅ Notas encontradas' },
-  save_note: { start: '💾 Guardando nota en Obsidian...', done: '✅ Nota guardada' },
+  search_memory: { start: 'Déjame buscar eso...', done: 'Encontré algo' },
+  search_notes: { start: 'Buscando en las notas...', done: 'Ya encontré' },
+  save_note: { start: 'Guardando eso...', done: 'Guardado' },
   // Ops — new tools
-  update_calendar_event: { start: '📅 Actualizando evento...', done: '✅ Evento actualizado' },
-  delete_calendar_event: { start: '📅 Eliminando evento...', done: '✅ Evento eliminado' },
-  search_calendar_events: { start: '📅 Buscando eventos...', done: '✅ Búsqueda completa' },
-  read_email_full: { start: '📧 Leyendo email completo...', done: '✅ Email leído' },
-  reply_to_email: { start: '📧 Respondiendo email...', done: '✅ Respuesta enviada' },
-  create_draft: { start: '📧 Creando borrador...', done: '✅ Borrador creado' },
-  connect_google_account: { start: '🔗 Generando link de conexión...', done: '✅ Link generado' },
-  list_google_accounts: { start: '👥 Listando cuentas...', done: '✅ Cuentas listadas' },
-  list_calendars: { start: '📅 Listando calendarios...', done: '✅ Calendarios listados' },
-  create_calendar: { start: '📅 Creando calendario...', done: '✅ Calendario creado' },
-  set_reminder: { start: '⏰ Creando recordatorio...', done: '✅ Recordatorio creado' },
+  update_calendar_event: { start: 'Actualizando el evento...', done: 'Evento actualizado' },
+  delete_calendar_event: { start: 'Eliminando el evento...', done: 'Eliminado' },
+  search_calendar_events: { start: 'Buscando en la agenda...', done: 'Listo' },
+  read_email_full: { start: 'Leyendo ese email...', done: 'Ya lo leí' },
+  reply_to_email: { start: 'Respondiendo...', done: 'Respuesta enviada' },
+  create_draft: { start: 'Armando el borrador...', done: 'Borrador listo' },
+  connect_google_account: { start: 'Generando el link...', done: 'Ahí te va el link' },
+  list_google_accounts: { start: 'Mirando las cuentas...', done: 'Listo' },
+  list_calendars: { start: 'Revisando calendarios...', done: 'Listo' },
+  create_calendar: { start: 'Creando el calendario...', done: 'Calendario creado' },
+  set_reminder: { start: 'Poniendo el recordatorio...', done: 'Recordatorio listo' },
   // Memory — new tools
-  list_notes: { start: '📂 Listando notas de Obsidian...', done: '✅ Notas listadas' },
-  verify_obsidian: { start: '🔍 Verificando conexión Obsidian...', done: '✅ Verificación completa' },
+  list_notes: { start: 'Mirando las notas...', done: 'Listo' },
+  verify_obsidian: { start: 'Verificando la conexión...', done: 'Todo bien' },
   // Core
-  route_to_agent: { start: '🔀 Delegando al agente especializado...', done: '' },
-  transcribe_audio: { start: '🎤 Transcribiendo audio...', done: '✅ Audio transcrito' },
+  route_to_agent: { start: '', done: '' },
+  transcribe_audio: { start: 'Escuchando el audio...', done: 'Ya lo tengo' },
   // OpenClaw — universal
-  openclaw_query: { start: '🦾 Delegando a OpenClaw...', done: '✅ OpenClaw respondió' },
+  openclaw_query: { start: 'Dame un momento, estoy en eso...', done: 'Listo' },
 };
 
 // Universal OpenClaw tool definition — inyectada automáticamente en todos los agentes
@@ -108,25 +108,21 @@ export abstract class BaseAgent {
     // Send initial progress if we have a callback
     if (onProgress) {
       const agentNames: Record<string, string> = {
-        core: '🧠 Jarvis procesando...',
-        memory: '💾 Agente de Memoria trabajando...',
-        content: '✍️ Agente de Contenido trabajando...',
-        ops: '⚙️ Agente de Operaciones trabajando...',
-        analyst: '🔬 Agente Analista trabajando...',
+        core: 'Va, dame un momento...',
+        memory: 'Déjame revisar eso...',
+        content: 'Dale, ya me pongo en eso...',
+        ops: 'En eso estoy...',
+        analyst: 'Analizando eso, ya te cuento...',
       };
-      await onProgress(agentNames[this.config.name] || '⏳ Procesando...').catch(() => {});
+      await onProgress(agentNames[this.config.name] || 'Dame un seg...').catch(() => {});
     }
 
     const messages = this.buildMessages(req);
 
-    // Notify which skills were activated
-    if (onProgress && this.config.name !== 'core') {
+    // Skills are matched silently — no need to announce them to the user
+    if (this.config.name !== 'core') {
       const messageText = req.message.text || req.intent || '';
-      const matched = matchSkills(messageText);
-      if (matched.length) {
-        const names = matched.map(s => s.name).join(', ');
-        await onProgress(`📚 Skills activadas: ${names}`).catch(() => {});
-      }
+      matchSkills(messageText); // skills get injected into context, no progress message
     }
 
     // Build the effective tool list: agent tools + universal OpenClaw tool
@@ -144,7 +140,7 @@ export abstract class BaseAgent {
       iteration++;
 
       if (onProgress && iteration > 1) {
-        await onProgress(`⏳ Paso ${iteration}/${maxIterations}...`).catch(() => {});
+        await onProgress('Sigo en eso, un momento...').catch(() => {});
       }
 
       const response = await callLLM(messages, {
@@ -188,7 +184,7 @@ export abstract class BaseAgent {
               toolResults.push(JSON.stringify({ error: err.message }));
 
               if (onProgress) {
-                await onProgress(`❌ Error en OpenClaw: ${err.message.slice(0, 100)}`).catch(() => {});
+                await onProgress(`Uy, no me funcionó eso: ${err.message.slice(0, 100)}`).catch(() => {});
               }
             }
           }
@@ -221,7 +217,7 @@ export abstract class BaseAgent {
           toolResults.push(`Error: ${error.message}`);
 
           if (onProgress) {
-            await onProgress(`❌ Error en ${call.name}: ${error.message.slice(0, 100)}`).catch(() => {});
+            await onProgress(`Se me complicó con eso: ${error.message.slice(0, 100)}`).catch(() => {});
           }
         }
       }

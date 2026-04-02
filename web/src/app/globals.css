@@ -92,3 +92,98 @@ body {
 .glowing-text {
   text-shadow: 0 0 10px var(--jarvis-cyan);
 }
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 255, 0.2);
+  border-radius: 2px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 229, 255, 0.4);
+}
+
+/* Voice orb glow states */
+@keyframes orb-glow-idle {
+  0%, 100% { box-shadow: 0 0 30px rgba(0, 229, 255, 0.15); }
+  50% { box-shadow: 0 0 50px rgba(0, 229, 255, 0.3); }
+}
+
+@keyframes orb-glow-listening {
+  0%, 100% { box-shadow: 0 0 40px rgba(0, 229, 255, 0.3); }
+  50% { box-shadow: 0 0 80px rgba(0, 229, 255, 0.6); }
+}
+
+@keyframes orb-glow-processing {
+  0%, 100% { box-shadow: 0 0 60px rgba(0, 229, 255, 0.4); }
+  50% { box-shadow: 0 0 100px rgba(0, 119, 255, 0.5); }
+}
+
+@keyframes orb-glow-speaking {
+  0%, 100% { box-shadow: 0 0 50px rgba(0, 229, 255, 0.35); }
+  50% { box-shadow: 0 0 90px rgba(0, 229, 255, 0.55); }
+}
+
+.orb-idle { animation: orb-glow-idle 3s ease-in-out infinite; }
+.orb-listening { animation: orb-glow-listening 1.5s ease-in-out infinite; }
+.orb-processing { animation: orb-glow-processing 0.8s ease-in-out infinite; }
+.orb-speaking { animation: orb-glow-speaking 1s ease-in-out infinite; }
+
+/* Mic button pulse */
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(0, 229, 255, 0); }
+}
+
+.mic-pulsing {
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+/* Markdown styles in chat */
+.jarvis-markdown h1,
+.jarvis-markdown h2,
+.jarvis-markdown h3 {
+  color: var(--jarvis-cyan);
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.jarvis-markdown p {
+  margin-bottom: 0.5em;
+}
+.jarvis-markdown ul, .jarvis-markdown ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.5em;
+}
+.jarvis-markdown li {
+  margin-bottom: 0.25em;
+}
+.jarvis-markdown code {
+  background: rgba(0, 229, 255, 0.1);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.jarvis-markdown pre {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  border-radius: 4px;
+  padding: 0.75em;
+  overflow-x: auto;
+  margin-bottom: 0.5em;
+}
+.jarvis-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+.jarvis-markdown strong {
+  color: var(--jarvis-cyan);
+}
+.jarvis-markdown a {
+  color: var(--jarvis-cyan);
+  text-decoration: underline;
+}

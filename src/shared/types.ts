@@ -10,6 +10,7 @@ export interface WAMessage {
   caption?: string;
   timestamp: number;
   messageId: string;
+  platform?: 'whatsapp' | 'web';
 }
 
 // === Roles del equipo ===
@@ -91,59 +92,33 @@ export interface ScheduledJob {
   nextRun?: string;
 }
 
-// === Daily Content Engine ===
+// === Daily Briefing Engine (Alexander Cast) ===
 export interface ContentIdea {
   title: string;
   angle: string;
-  relevance: string;
-  platform: string;
-  funnelPosition: 'TOFU' | 'MOFU' | 'BOFU';
-  contentPillar: string;
+  whyToday: string;
+  platform: 'instagram' | 'tiktok' | 'youtube' | 'linkedin';
+  viralScore: number;
 }
 
-export interface ReelStructure {
-  creator: {
-    script: string;
-    timing: string;
-    deliveryNotes: string;
-  };
-  producer: {
-    shotList: string;
-    transitions: string;
-    textOverlays: string;
-    music: string;
-    specs: string;
-  };
-  strategist: {
-    funnelPosition: string;
-    pillar: string;
-    objective: string;
-    kpis: string;
-    schedule: string;
-    repurposing: string;
-  };
-  trafficker: {
-    adScore: number;
-    targeting: string;
-    budget: string;
-    paidCTA: string;
-  };
-  communityManager: {
-    caption: string;
-    hashtags: string;
-    engagement: string;
-    replyTemplates: string;
-    crossPosting: string;
-  };
+export interface VideoScript {
+  hook: string;
+  duration: '30s' | '60s' | '90s';
+  voiceScript: string;
+  visualScript: string;
+  editingScript: string;
+  caption: string;
+  hashtags: string;
+  cta: string;
 }
 
 export interface DailyReport {
   date: string;
   emailSummary: string;
   webTrends: string;
-  ideas: (ContentIdea & { structure: ReelStructure })[];
+  ideas: (ContentIdea & { videoScript: VideoScript })[];
   generatedAt: string;
-  tokensUsed?: number;
+  accountsScanned: string[];
 }
 
 // === LLM ===

@@ -23,6 +23,7 @@
     "glob": "^11.0.0",
     "gray-matter": "^4.0.3",
     "linkedom": "^0.18.0",
+    "multer": "^2.1.1",
     "nano": "^10.1.0",
     "nanoid": "^5.0.0",
     "node-cron": "^3.0.3",
@@ -35,6 +36,7 @@
   "type": "module",
   "devDependencies": {
     "@types/express": "^5.0.0",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

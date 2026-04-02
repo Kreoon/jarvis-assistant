@@ -41,3 +41,29 @@ export async function transcribeAudio(mediaId: string): Promise<string> {
     return '(Error transcribiendo audio)';
   }
 }
+
+// Transcribe from raw audio buffer (for web platform)
+export async function transcribeAudioBuffer(buffer: Buffer, mimeType: string): Promise<string> {
+  if (!openai) {
+    log.warn('OpenAI not configured, cannot transcribe');
+    return '(Audio recibido pero no puedo transcribirlo - OpenAI no configurado)';
+  }
+
+  try {
+    const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('ogg') ? 'ogg' : 'mp3';
+    const file = new File([buffer], `audio.${ext}`, { type: mimeType });
+
+    const transcription = await openai.audio.transcriptions.create({
+      model: 'whisper-1',
+      file,
+      language: 'es',
+      prompt: VOCABULARY,
+    });
+
+    log.info({ length: transcription.text.length }, 'Web audio transcribed');
+    return transcription.text;
+  } catch (error: any) {
+    log.error({ error: error.message }, 'Web audio transcription failed');
+    return '(Error transcribiendo audio)';
+  }
+}

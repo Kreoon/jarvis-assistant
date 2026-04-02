@@ -68,7 +68,7 @@ export const config = {
     cron: process.env.DAILY_ENGINE_CRON || '0 6 * * 1-5',
     maxIdeas: Number(process.env.DAILY_ENGINE_MAX_IDEAS) || 3,
     ownerPhone: '573132947776',
-    brands: ['Alexander Cast', 'UGC Colombia', 'Kreoon', 'Reyes del Contenido'],
+    topics: ['inteligencia artificial', 'AI', 'tecnología', 'negocios', 'emprendimiento', 'automatización', 'startups', 'estrategia digital', 'marketing digital', 'contenido', 'motivación'],
     enabled: process.env.DAILY_ENGINE_ENABLED !== 'false',
   },
 } as const;

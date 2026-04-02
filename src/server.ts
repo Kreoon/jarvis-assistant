@@ -10,7 +10,19 @@ import { initScheduler, getJobs } from './core/scheduler.js';
 import { sendText, sendReaction, markAsRead } from './connectors/whatsapp.js';
 import { transcribeAudio } from './connectors/whisper.js';
 import { saveAccount } from './shared/google-api.js';
+import { pushLog } from './shared/log-buffer.js';
+import { incrementMessages, incrementErrors } from './shared/metrics.js';
 import type { WAMessage, AgentRequest, ConversationContext } from './shared/types.js';
+
+// Route modules
+import { chatRouter, initChatRouter } from './routes/chat.js';
+import { ttsRouter } from './routes/tts.js';
+import { systemRouter } from './routes/system.js';
+import { agentsRouter, initAgentsRouter } from './routes/agents.js';
+import { memoryRouter } from './routes/memory.js';
+import { engineRouter } from './routes/engine.js';
+import { calendarRouter } from './routes/calendar.js';
+import { analystRouter, initAnalystRouter } from './routes/analyst.js';
 
 const app = express();
 app.use(express.json({
@@ -69,6 +81,31 @@ function addToContext(phone: string, role: 'user' | 'assistant', content: string
   }
   saveConversations();
 }
+
+// === Initialize route modules with shared conversation state ===
+const conversationCtx = { getContext, addToContext };
+initChatRouter(conversationCtx);
+initAgentsRouter(conversationCtx);
+initAnalystRouter(conversationCtx);
+
+// === Log buffer: capture pino-like logs ===
+const originalLog = logger;
+// Intercept info/warn/error to also push to log buffer
+const logProxy = new Proxy(logger, {
+  get(target, prop) {
+    const original = (target as any)[prop];
+    if (typeof original === 'function' && ['info', 'warn', 'error', 'debug'].includes(prop as string)) {
+      return (...args: any[]) => {
+        // Push to log buffer
+        const obj = typeof args[0] === 'object' ? args[0] : {};
+        const msg = typeof args[args.length - 1] === 'string' ? args[args.length - 1] : '';
+        pushLog({ level: prop as string, msg, time: Date.now(), ...obj });
+        return original.apply(target, args);
+      };
+    }
+    return original;
+  },
+});
 
 // === Webhook verification ===
 app.get('/webhook', (req, res) => {
@@ -134,6 +171,7 @@ app.post('/webhook', async (req, res) => {
       caption: msg.image?.caption || msg.document?.caption,
       timestamp: parseInt(msg.timestamp) * 1000,
       messageId,
+      platform: 'whatsapp',
     };
 
     // Get team member or reject
@@ -154,6 +192,7 @@ app.post('/webhook', async (req, res) => {
 
     // Add to conversation context
     addToContext(waMessage.from, 'user', waMessage.text || '(media)');
+    incrementMessages();
 
     // Build agent request
     const agentReq: AgentRequest = {
@@ -189,6 +228,7 @@ app.post('/webhook', async (req, res) => {
 
   } catch (error: any) {
     logger.error({ error: error.message, stack: error.stack }, 'Error processing message');
+    incrementErrors();
   }
 });
 
@@ -204,6 +244,8 @@ app.get('/auth/google/start', (req, res) => {
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/drive.file',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
   ].join(' ');
@@ -228,12 +270,12 @@ app.get('/auth/google/callback', async (req, res) => {
 
   if (error) {
     logger.warn({ error, account }, 'OAuth denied by user');
-    res.status(400).send(`<h1>❌ Autorización cancelada</h1><p>${error}</p>`);
+    res.status(400).send(`<h1>Autorizacion cancelada</h1><p>${error}</p>`);
     return;
   }
 
   if (!code || !account) {
-    res.status(400).send('Faltan parámetros');
+    res.status(400).send('Faltan parametros');
     return;
   }
 
@@ -248,7 +290,7 @@ app.get('/auth/google/callback', async (req, res) => {
     });
 
     if (!tokenData.refresh_token) {
-      res.status(400).send('<h1>❌ Error</h1><p>No se obtuvo refresh token. Intenta de nuevo.</p>');
+      res.status(400).send('<h1>Error</h1><p>No se obtuvo refresh token. Intenta de nuevo.</p>');
       return;
     }
 
@@ -270,23 +312,35 @@ app.get('/auth/google/callback', async (req, res) => {
 
     // Notify owner via WhatsApp
     await sendText('573132947776',
-      `✅ *Cuenta Google conectada*\n\n• Nombre: ${account}\n• Email: ${userInfo.email}\n• Persona: ${userInfo.name || 'N/A'}\n\nYa puedes usar \`account: "${account}"\` en calendario y email.`
+      `Listo parce, cuenta conectada:\n\n${account} -> ${userInfo.email}\n\nYa tengo acceso a calendario, email y Drive de esa cuenta.`
     ).catch(() => {});
 
     res.send(`
       <html>
         <head><meta charset="utf-8"><title>Jarvis - Cuenta conectada</title></head>
         <body style="font-family: system-ui; max-width: 500px; margin: 80px auto; text-align: center;">
-          <h1>✅ Cuenta conectada</h1>
+          <h1>Cuenta conectada</h1>
           <p><strong>${userInfo.email}</strong> conectada como <strong>"${account}"</strong></p>
-          <p style="color: #666;">Puedes cerrar esta ventana. Jarvis ya tiene acceso a tu calendario y email.</p>
+          <p style="color: #666;">Puedes cerrar esta ventana. Jarvis ya tiene acceso a tu calendario, email y Drive.</p>
         </body>
       </html>
     `);
   } catch (err: any) {
     logger.error({ error: err.message, account }, 'OAuth callback error');
-    res.status(500).send(`<h1>❌ Error</h1><p>${err.message}</p>`);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
+});
+
+// === Serve audio files (TTS output for WhatsApp) ===
+app.get('/audio/:filename', (req, res) => {
+  const filePath = `/app/data/tmp/${req.params.filename}`;
+  const fs = require('fs');
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Audio not found');
+  }
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Disposition', `inline; filename="${req.params.filename}"`);
+  fs.createReadStream(filePath).pipe(res);
 });
 
 // === Health check ===
@@ -299,101 +353,23 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// === Web Platform API ===
+// === Mount Web Platform API routes ===
+app.use('/api/chat', webAuth, chatRouter);
+app.use('/api/tts', webAuth, ttsRouter);
+app.use('/api/system', webAuth, systemRouter);
+app.use('/api/agents', webAuth, agentsRouter);
+app.use('/api/memory', webAuth, memoryRouter);
+app.use('/api/engine', webAuth, engineRouter);
+app.use('/api/calendar', webAuth, calendarRouter);
+app.use('/api/analyst', webAuth, analystRouter);
 
-// System Status (HUD Diagnostic)
+// Legacy endpoints (keep for backwards compat)
 app.get('/api/status', webAuth, (_req, res) => {
-  res.json({
-    status: 'online',
-    system: 'JARVIS-V2',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    agents: [
-      { name: 'core', status: 'active', desc: 'Central Processing Unit' },
-      { name: 'memory', status: 'active', desc: 'LTM & Context Retrieval' },
-      { name: 'content', status: 'active', desc: 'Creative Content Engine' },
-      { name: 'ops', status: 'active', desc: 'Operational Skills & Tools' },
-      { name: 'analyst', status: 'active', desc: 'Social Data Analyst' },
-      { name: 'engine', status: 'active', desc: 'Daily Intelligence Engine' },
-    ],
-    memory: process.memoryUsage(),
-    cpu: process.cpuUsage(),
-  });
+  res.redirect('/api/system/status');
 });
 
-// Chat Interface
-app.post('/api/chat', webAuth, async (req, res) => {
-  const { message, from = '573132947776' } = req.body;
-  
-  if (!message) {
-    return res.status(400).json({ error: 'Message payload missing.' });
-  }
-
-  const member = team[from] || team['573132947776'];
-  const messageId = `web_${Date.now()}`;
-
-  const waMessage: WAMessage = {
-    from,
-    name: member.name,
-    type: 'text',
-    text: message,
-    timestamp: Date.now(),
-    messageId,
-  };
-
-  addToContext(from, 'user', message);
-
-  const agentReq: AgentRequest = {
-    agent: 'core',
-    message: waMessage,
-    member,
-    context: getContext(from),
-  };
-
-  try {
-    const response = await routeMessage(agentReq);
-    addToContext(from, 'assistant', response.text);
-    res.json({
-      id: messageId,
-      response: response.text,
-      timestamp: Date.now(),
-    });
-  } catch (err: any) {
-    logger.error({ error: err.message }, 'Web API Chat error');
-    res.status(500).json({ error: 'JARVIS core encountered an internal error.' });
-  }
-});
-
-// Reports Browser (Engine Output)
-app.get('/api/reports', webAuth, async (_req, res) => {
-  try {
-    const couchUrl = config.couchdb.url || 'http://couchdb:5984';
-    const obsidianDb = process.env.OBSIDIAN_DB || 'obsidian-vault';
-    const auth = config.couchdb.user
-      ? { Authorization: `Basic ${Buffer.from(`${config.couchdb.user}:${config.couchdb.pass}`).toString('base64')}` }
-      : {};
-
-    const { data } = await axios.get(`${couchUrl}/${obsidianDb}/_all_docs`, {
-      params: {
-        include_docs: true,
-        startkey: '"jarvis_daily-engine_"',
-        endkey: '"jarvis_daily-engine_\ufff0"',
-      },
-      headers: { ...auth },
-    });
-
-    const reports = data.rows.map((row: any) => ({
-      id: row.id,
-      date: row.id.split('_').pop()?.replace('.md', ''),
-      content: row.doc.content,
-      updatedAt: row.doc.updatedAt,
-    })).sort((a: any, b: any) => b.id.localeCompare(a.id));
-
-    res.json(reports);
-  } catch (err: any) {
-    logger.error({ error: err.message }, 'Failed to fetch reports from CouchDB');
-    res.json([]); // Return empty list on failure
-  }
+app.get('/api/reports', webAuth, (_req, res) => {
+  res.redirect('/api/engine/reports');
 });
 
 // === Graceful shutdown: persist conversations before Docker stops the process ===
@@ -407,8 +383,9 @@ process.on('SIGTERM', () => {
 // === Start server ===
 app.listen(config.port, () => {
   logger.info({ port: config.port }, 'Jarvis v2 is running');
-  logger.info(`Agents: core, memory, content, ops, analyst, engine`);
+  logger.info(`Agents: core, memory, content, ops, analyst, engine, brand-researcher`);
   logger.info(`LLM primary: ${config.llm.primaryProvider}`);
+  logger.info(`Web API routes: /api/chat, /api/tts, /api/system, /api/agents, /api/memory, /api/engine, /api/calendar, /api/analyst`);
 
   // Initialize scheduler after server is up
   initScheduler();

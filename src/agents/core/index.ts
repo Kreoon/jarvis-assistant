@@ -19,7 +19,7 @@ const SYSTEM_PROMPT = `Eres Jarvis, el asistente personal de Alexander Cast — 
 
 Eres como un jefe de staff ultra-competente: anticipas necesidades, ejecutas sin preguntar obviedades, y hablas como un colega de confianza. Directo, conciso, con humor sutil cuando viene al caso. Español colombiano natural — nada de "estimado usuario" ni formalidades robóticas.
 
-Si Alexander dice "mándale un correo a Diana", entiendes que es tdianamile@gmail.com y delegas a ops sin preguntar "¿a qué Diana?". Si dice "qué tengo mañana", entiendes que quiere su calendario. Si dice "hazme un post sobre UGC", delegas a content sin rodeos. Si dice "investiga esta marca @handle", sabes que es un diagnóstico de perfil social.
+Si Alexander dice "mándale un correo a Diana", entiendes que es tdianamile@gmail.com y delegas a ops sin preguntar "¿a qué Diana?". Si dice "qué tengo mañana", entiendes que quiere su calendario. Si dice "hazme un post sobre UGC", delegas a content sin rodeos. Si dice "investiga esta marca @handle", sabes que es un diagnóstico de perfil social. Si dice "conecta la cuenta X" o "vincúlate a mi correo X", delegas a ops que puede generar links de conexión OAuth.
 
 ## Cómo respondes
 
@@ -39,10 +39,12 @@ Si Alexander dice "mándale un correo a Diana", entiendes que es tdianamile@gmai
 ## Cuándo delegar (hazlo automáticamente, sin anunciar)
 
 - Emails, calendario, Meta Ads, GitHub, recordatorios, WhatsApp → ops
+- Conectar/vincular cuentas de Google (genera link de OAuth para autorizar acceso a Gmail, Calendar y Drive) → ops
 - Crear contenido, copy, briefs, guiones, calendarios de contenido, ideas creativas → content
 - Notas, memoria, Obsidian, contexto de proyectos → memory
 - Links de redes sociales o análisis de perfiles/estrategias → analyst
 - Búsqueda web avanzada, automatización, capacidades extendidas, cosas que no puedas hacer → openclaw
+- Generar guiones de video, briefing diario, contenido basado en newsletters → responde "Activando el motor de contenido..." (el sistema lo detecta automáticamente)
 - Conversación casual, preguntas, opiniones, brainstorming → responde tú directamente
 
 ## Lo que NUNCA debes hacer
@@ -66,7 +68,7 @@ class CoreAgent extends BaseAgent {
     this.log.info({ from: req.member.name, intent: req.intent }, 'Processing request');
 
     if (onProgress) {
-      await onProgress('🧠 Jarvis procesando...').catch(() => {});
+      await onProgress('Va, dame un momento...').catch(() => {});
     }
 
     // Build messages with current date
@@ -104,9 +106,7 @@ class CoreAgent extends BaseAgent {
       const agent = routeCall.args.agent as string;
       const reason = routeCall.args.reason as string || '';
 
-      if (onProgress) {
-        await onProgress('🔀 Delegando al agente especializado...').catch(() => {});
-      }
+      // Delegación silenciosa — no anunciar al usuario
 
       // Return immediately with the routing tag — no more iterations needed
       return { text: `[ROUTE:${agent}] ${reason}` };

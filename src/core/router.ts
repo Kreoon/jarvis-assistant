@@ -19,14 +19,24 @@ const RESEARCH_TRIGGER = /^\/research\s+(\S+@\S+\.\S+)/i;
 // Diagnosis trigger: "diagnostico para @handle" or "analiza @handle" or "/diagnose @handle"
 const DIAGNOSIS_TRIGGER = /(?:diagn[oó]stic[oa]|an[aá]li[sz][aei]s?|investiga|research).*?@(\w[\w._]{1,30}\w)/i;
 
-// Engine trigger patterns
+// Engine trigger patterns — match loosely to avoid missing triggers
 const ENGINE_TRIGGERS = [
-  /jarvis\s+genera\s+contenido/i,
+  /genera[r]?\s+contenido/i,
   /\/engine/i,
-  /daily\s+report/i,
-  /genera\s+reporte\s+diario/i,
+  /daily\s+(report|briefing)/i,
+  /genera[r]?\s+reporte/i,
   /motor\s+de\s+contenido/i,
   /content\s+engine/i,
+  /genera[r]?\s*guion/i,
+  /briefing\s+diario/i,
+  /guiones/i,
+  /busca.*correos.*noticias/i,
+  /busca.*newsletters/i,
+  /lee.*emails.*genera/i,
+  /revisa.*correos/i,
+  /genera.*video.*viral/i,
+  /crea.*contenido/i,
+  /dame.*guion/i,
 ];
 
 const log = agentLogger('router');
@@ -80,7 +90,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
     log.info({ url: socialUrl }, 'Social media URL detected, routing to analyst');
 
     if (onProgress) {
-      await onProgress('🔗 Link de red social detectado → Agente Analista activado').catch(() => {});
+      await onProgress('Vi el link, déjame revisarlo...').catch(() => {});
     }
 
     const analystReq: AgentRequest = {
@@ -101,7 +111,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
     log.info({ email }, '/research command detected');
 
     if (onProgress) {
-      await onProgress('🔬 Iniciando investigación de marca...').catch(() => {});
+      await onProgress('Dale, investigando esa marca...').catch(() => {});
     }
 
     try {
@@ -112,7 +122,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
       return { text: reply };
     } catch (error: any) {
       log.error({ error: error.message }, '/research command failed');
-      return { text: `❌ Error iniciando investigación: ${error.message}` };
+      return { text: `Uy parce, no pude con esa investigación: ${error.message}` };
     }
   }
 
@@ -123,7 +133,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
     log.info({ handle }, 'Brand diagnosis by @handle detected');
 
     if (onProgress) {
-      await onProgress('🔬 Iniciando diagnostico de marca...').catch(() => {});
+      await onProgress('Mirando esa marca, ya te cuento...').catch(() => {});
     }
 
     try {
@@ -134,7 +144,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
       return { text: reply };
     } catch (error: any) {
       log.error({ error: error.message }, 'Brand diagnosis by handle failed');
-      return { text: `❌ Error iniciando diagnóstico: ${error.message}` };
+      return { text: `Uy, no pude hacer el diagnóstico: ${error.message}` };
     }
   }
 
@@ -151,7 +161,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
     log.info('Engine trigger detected, running daily content engine');
 
     if (onProgress) {
-      await onProgress('🚀 Motor de Contenido Diario activado...').catch(() => {});
+      await onProgress('Generando el contenido del día, dame un momento...').catch(() => {});
     }
 
     try {
@@ -164,10 +174,10 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
 
       const report = await engineModule.runDailyContentEngine((msg) => {
         onProgress?.(msg);
-      });
+      }, req.message.from);
 
-      // Post to web app
-      await reportModule.postDailyReport(report).catch(() => {});
+      // Post to web app and get URL
+      const webUrl = await reportModule.postDailyReport(report).catch(() => null);
 
       // Save to Obsidian
       try {
@@ -201,12 +211,12 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
         });
       } catch { /* Obsidian save failed, non-critical */ }
 
-      // Return WhatsApp summary
-      const summary = reportModule.formatWhatsAppSummary(report);
+      // Return WhatsApp summary with web link
+      const summary = reportModule.formatWhatsAppSummary(report, webUrl);
       return { text: summary };
     } catch (error: any) {
       log.error({ error: error.message }, 'Engine execution failed');
-      return { text: `❌ Error ejecutando el motor de contenido: ${error.message}` };
+      return { text: `Se me complicó generando el contenido: ${error.message}` };
     }
   }
 
@@ -226,6 +236,39 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
   const routeMatch = coreResponse.text.match(/\[ROUTE:(\w+)\]/);
   if (routeMatch) {
     const targetAgent = routeMatch[1] as AgentName;
+
+    // Handle openclaw routing — delegate to content agent which has openclaw as universal tool
+    if (targetAgent === 'openclaw') {
+      log.info({ from: 'core', to: 'content (via openclaw)' }, 'Routing openclaw request to content agent');
+      if (onProgress) {
+        await onProgress('Dame un momento, estoy en eso...').catch(() => {});
+      }
+      const contentReq: AgentRequest = {
+        ...req,
+        agent: 'content',
+        intent: coreResponse.text.replace(/\[ROUTE:\w+\]/, '').trim(),
+      };
+      const response = await contentAgent.handle(contentReq, onProgress);
+      storeInteraction(req, response, 'content').catch(() => {});
+      return response;
+    }
+
+    // Handle analyst routing (analyst is not in baseAgents but has its own handle)
+    if (targetAgent === 'analyst') {
+      log.info({ from: 'core', to: 'analyst' }, 'Routing to analyst agent');
+      if (onProgress) {
+        await onProgress('Analizando, ya te cuento...').catch(() => {});
+      }
+      const analystReq: AgentRequest = {
+        ...req,
+        agent: 'analyst',
+        intent: coreResponse.text.replace(/\[ROUTE:\w+\]/, '').trim(),
+      };
+      const response = await analystAgent.handle(analystReq, onProgress);
+      storeInteraction(req, response, 'analyst').catch(() => {});
+      return response;
+    }
+
     if (targetAgent in baseAgents && targetAgent !== 'core') {
       // Check if this agent is blocked for the user's role
       const blockedAgents = ROLE_BLOCKED_AGENTS[req.member.role];
@@ -238,12 +281,12 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
 
       if (onProgress) {
         const names: Record<string, string> = {
-          memory: '💾 Delegando al Agente de Memoria...',
-          content: '✍️ Delegando al Agente de Contenido...',
-          ops: '⚙️ Delegando al Agente de Operaciones...',
-          analyst: '🔬 Delegando al Agente Analista...',
+          memory: 'Déjame revisar eso...',
+          content: 'Ya me pongo en eso...',
+          ops: 'En eso estoy...',
+          analyst: 'Analizando, ya te cuento...',
         };
-        await onProgress(names[targetAgent] || '🔀 Delegando...').catch(() => {});
+        await onProgress(names[targetAgent] || 'Dame un seg...').catch(() => {});
       }
 
       const specialistReq: AgentRequest = {
