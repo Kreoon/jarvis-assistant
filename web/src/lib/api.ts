@@ -216,7 +216,7 @@ export class JarvisAPI {
     const form = new FormData();
     form.append("audio", blob, "recording.webm");
 
-    const res = await fetch(`${this.baseUrl}/api/audio`, {
+    const res = await fetch(`${this.baseUrl}/api/chat/audio`, {
       method: "POST",
       headers: this.authHeaders(),
       body: form,
@@ -230,7 +230,7 @@ export class JarvisAPI {
     form.append("file", file);
     if (message) form.append("message", message);
 
-    const res = await fetch(`${this.baseUrl}/api/upload`, {
+    const res = await fetch(`${this.baseUrl}/api/chat/upload`, {
       method: "POST",
       headers: this.authHeaders(),
       body: form,
@@ -242,19 +242,19 @@ export class JarvisAPI {
   // --- System ---
 
   async getStatus(): Promise<unknown> {
-    return this.get<unknown>("/api/status");
+    return this.get<unknown>("/api/system/status");
   }
 
   async getMetrics(): Promise<MetricsData> {
-    return this.get<MetricsData>("/api/metrics");
+    return this.get<MetricsData>("/api/system/metrics");
   }
 
   async getLogs(limit = 50): Promise<LogEntry[]> {
-    return this.get<LogEntry[]>(`/api/logs?limit=${limit}`);
+    return this.get<LogEntry[]>(`/api/system/logs?limit=${limit}`);
   }
 
   async getJobs(): Promise<JobEntry[]> {
-    return this.get<JobEntry[]>("/api/jobs");
+    return this.get<JobEntry[]>("/api/system/jobs");
   }
 
   // --- Agents ---
@@ -273,7 +273,7 @@ export class JarvisAPI {
 
     (async () => {
       try {
-        const res = await fetch(`${this.baseUrl}/api/agents/${encodeURIComponent(name)}/stream`, {
+        const res = await fetch(`${this.baseUrl}/api/agents/${encodeURIComponent(name)}/interact`, {
           method: "POST",
           headers: this.jsonHeaders(),
           body: JSON.stringify({ message }),
@@ -295,11 +295,11 @@ export class JarvisAPI {
   // --- Reports / Engine ---
 
   async getReports(): Promise<ReportEntry[]> {
-    return this.get<ReportEntry[]>("/api/reports");
+    return this.get<ReportEntry[]>("/api/engine/reports");
   }
 
   async getLatestReport(): Promise<ReportEntry> {
-    return this.get<ReportEntry>("/api/reports/latest");
+    return this.get<ReportEntry>("/api/engine/latest");
   }
 
   triggerEngine(
@@ -350,15 +350,15 @@ export class JarvisAPI {
 
   async listMemories(namespace?: string): Promise<unknown> {
     const path = namespace
-      ? `/api/memory?namespace=${encodeURIComponent(namespace)}`
-      : "/api/memory";
+      ? `/api/memory/list?namespace=${encodeURIComponent(namespace)}`
+      : "/api/memory/list";
     return this.get<unknown>(path);
   }
 
   // --- Calendar ---
 
   async getCalendarEvents(days = 7): Promise<CalendarEvent[]> {
-    return this.get<CalendarEvent[]>(`/api/calendar?days=${days}`);
+    return this.get<CalendarEvent[]>(`/api/calendar/events?days=${days}`);
   }
 
   // --- TTS ---
