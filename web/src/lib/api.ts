@@ -79,33 +79,36 @@ export interface JobEntry {
 // --- SSE helpers ---
 
 type SSEProgressCallback = (text: string) => void;
+type SSECompleteCallback = (text: string) => void;
 
-function parseSSELine(line: string): string | null {
-  if (line.startsWith("data: ")) {
-    const raw = line.slice(6).trim();
-    if (raw === "[DONE]") return null;
-    try {
-      const parsed = JSON.parse(raw) as { text?: string; chunk?: string; delta?: string };
-      return parsed.text ?? parsed.chunk ?? parsed.delta ?? null;
-    } catch {
-      // Raw text chunk, not JSON
-      return raw;
-    }
-  }
-  return null;
+interface SSEEvent {
+  type: "progress" | "complete" | "error";
+  text?: string;
+  [key: string]: unknown;
 }
 
-async function consumeSSE(
+function parseSSEEvent(line: string): SSEEvent | null {
+  if (!line.startsWith("data: ")) return null;
+  const raw = line.slice(6).trim();
+  if (raw === "[DONE]") return null;
+  try {
+    return JSON.parse(raw) as SSEEvent;
+  } catch {
+    return { type: "progress", text: raw };
+  }
+}
+
+async function consumeSSEWithTypes(
   response: Response,
   onProgress: SSEProgressCallback,
+  onComplete: SSECompleteCallback,
   signal: AbortSignal
-): Promise<string> {
+): Promise<void> {
   if (!response.body) throw new Error("Response body is null");
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let fullText = "";
 
   try {
     while (true) {
@@ -117,18 +120,22 @@ async function consumeSSE(
       buffer = lines.pop() ?? "";
 
       for (const line of lines) {
-        const chunk = parseSSELine(line.trim());
-        if (chunk) {
-          fullText += chunk;
-          onProgress(fullText);
+        const event = parseSSEEvent(line.trim());
+        if (!event || !event.text) continue;
+
+        if (event.type === "complete") {
+          onComplete(event.text);
+        } else if (event.type === "error") {
+          onComplete(event.text);
+        } else {
+          // progress
+          onProgress(event.text);
         }
       }
     }
   } finally {
     reader.cancel().catch(() => {});
   }
-
-  return fullText;
 }
 
 // --- JarvisAPI class ---
@@ -200,8 +207,9 @@ export class JarvisAPI {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`chatStream failed: ${res.status}`);
-        const full = await consumeSSE(res, onProgress, controller.signal);
-        if (!controller.signal.aborted) onComplete(full);
+        await consumeSSEWithTypes(res, onProgress, (text) => {
+          if (!controller.signal.aborted) onComplete(text);
+        }, controller.signal);
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           console.error("[JarvisAPI] chatStream error:", err);
@@ -280,8 +288,9 @@ export class JarvisAPI {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`agentInteract failed: ${res.status}`);
-        const full = await consumeSSE(res, onProgress, controller.signal);
-        if (!controller.signal.aborted) onComplete(full);
+        await consumeSSEWithTypes(res, onProgress, (text) => {
+          if (!controller.signal.aborted) onComplete(text);
+        }, controller.signal);
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           console.error("[JarvisAPI] agentInteract error:", err);
@@ -317,21 +326,21 @@ export class JarvisAPI {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`triggerEngine failed: ${res.status}`);
-        const full = await consumeSSE(res, onProgress, controller.signal);
-        if (!controller.signal.aborted) {
-          try {
-            const report = JSON.parse(full) as ReportEntry;
-            onComplete(report);
-          } catch {
-            // If the full text isn't JSON, wrap it
-            onComplete({
-              id: crypto.randomUUID(),
-              date: new Date().toISOString().split("T")[0],
-              content: full,
-              updatedAt: new Date().toISOString(),
-            });
+        await consumeSSEWithTypes(res, onProgress, (text) => {
+          if (!controller.signal.aborted) {
+            try {
+              const report = JSON.parse(text) as ReportEntry;
+              onComplete(report);
+            } catch {
+              onComplete({
+                id: crypto.randomUUID(),
+                date: new Date().toISOString().split("T")[0],
+                content: text,
+                updatedAt: new Date().toISOString(),
+              });
+            }
           }
-        }
+        }, controller.signal);
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           console.error("[JarvisAPI] triggerEngine error:", err);
