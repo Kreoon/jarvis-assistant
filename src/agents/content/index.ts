@@ -1,4 +1,5 @@
 import { BaseAgent } from '../../core/base-agent.js';
+import { callLLM } from '../../core/llm.js';
 import { searchWeb } from '../../shared/perplexity.js';
 import type { AgentRequest, LLMTool } from '../../shared/types.js';
 
@@ -188,47 +189,64 @@ class ContentAgent extends BaseAgent {
         },
 
         generate_caption: async (args) => {
+          const prompt = `Genera un caption de alta conversión para ${args.platform} sobre: "${args.topic}".
+Tono: ${args.tone ?? 'casual'}. Idioma: ${args.language ?? 'español'}.
+Incluye: hook poderoso en la primera línea, cuerpo con valor real, CTA claro al final.
+Adapta el formato y longitud óptimos para ${args.platform}.`;
+
+          const response = await callLLM(
+            [{ role: 'user', content: prompt }],
+            { maxTokens: 2000, temperature: 0.7 },
+          );
+
           return {
-            action: 'generate_caption',
+            caption: response.text,
             platform: args.platform,
             topic: args.topic,
             tone: args.tone ?? 'casual',
-            language: args.language ?? 'español',
-            instructions: `Genera un caption de alta conversión para ${args.platform} sobre: "${args.topic}".
-Tono: ${args.tone ?? 'casual'}. Idioma: ${args.language ?? 'español'}.
-Incluye: hook poderoso en la primera línea, cuerpo con valor real, CTA claro al final.
-Adapta el formato y longitud óptimos para ${args.platform}.`,
           };
         },
 
         generate_hashtags: async (args) => {
           const count = (args.count as number) ?? 15;
+          const prompt = `Genera ${count} hashtags optimizados para ${args.platform} sobre el tema: "${args.topic}".
+Mix recomendado: 30% hashtags grandes (>1M posts), 40% medianos (100K-1M), 30% pequeños (<100K) o de nicho.
+Incluye hashtags en español e inglés si aplica para mayor alcance.
+Formato: lista de hashtags listos para copiar y pegar.`;
+
+          const response = await callLLM(
+            [{ role: 'user', content: prompt }],
+            { maxTokens: 1000, temperature: 0.5 },
+          );
+
           return {
-            action: 'generate_hashtags',
+            hashtags: response.text,
             topic: args.topic,
             platform: args.platform,
             count,
-            instructions: `Genera ${count} hashtags optimizados para ${args.platform} sobre el tema: "${args.topic}".
-Mix recomendado: 30% hashtags grandes (>1M posts), 40% medianos (100K-1M), 30% pequeños (<100K) o de nicho.
-Incluye hashtags en español e inglés si aplica para mayor alcance.
-Formato: lista de hashtags listos para copiar y pegar.`,
           };
         },
 
         content_calendar: async (args) => {
           const pillars = (args.pillars as string[]).join(', ');
           const platforms = (args.platforms as string[]).join(', ');
-          return {
-            action: 'content_calendar',
-            days: args.days,
-            pillars: args.pillars,
-            platforms: args.platforms,
-            instructions: `Crea un calendario de contenido para ${args.days} días.
+          const prompt = `Crea un calendario de contenido para ${args.days} días.
 Pilares de contenido: ${pillars}.
 Plataformas: ${platforms}.
 Formato tabla por día: Fecha | Pilar | Plataforma | Formato (Reel/Carrusel/Story/etc) | Idea/Tema | Hook sugerido.
 Distribuye los pilares de forma balanceada. Incluye ideas específicas y accionables, no genéricas.
-Considera los mejores días/horarios para cada plataforma.`,
+Considera los mejores días/horarios para cada plataforma.`;
+
+          const response = await callLLM(
+            [{ role: 'user', content: prompt }],
+            { maxTokens: 4000, temperature: 0.6 },
+          );
+
+          return {
+            calendar: response.text,
+            days: args.days,
+            pillars: args.pillars,
+            platforms: args.platforms,
           };
         },
 
@@ -236,32 +254,31 @@ Considera los mejores días/horarios para cada plataforma.`,
           const painPoints = args.pain_points
             ? `\nPuntos de dolor: ${(args.pain_points as string[]).join(', ')}`
             : '';
-          return {
-            action: 'write_copy',
-            formula: args.formula,
-            product: args.product,
-            audience: args.audience,
-            pain_points: args.pain_points ?? [],
-            instructions: `Escribe copy persuasivo usando la fórmula ${args.formula} para:
+          const prompt = `Escribe copy persuasivo usando la fórmula ${args.formula} para:
 Producto/Servicio: "${args.product}"
 Audiencia objetivo: "${args.audience}"${painPoints}
 
 Aplica la fórmula ${args.formula} correctamente:
 ${getFormulaGuide(args.formula as string)}
 
-El copy debe ser en español colombiano/LATAM natural. Longitud apropiada para uso en redes sociales o landing page.`,
+El copy debe ser en español colombiano/LATAM natural. Longitud apropiada para uso en redes sociales o landing page.`;
+
+          const response = await callLLM(
+            [{ role: 'user', content: prompt }],
+            { maxTokens: 3000, temperature: 0.7 },
+          );
+
+          return {
+            copy: response.text,
+            formula: args.formula,
+            product: args.product,
+            audience: args.audience,
+            pain_points: args.pain_points ?? [],
           };
         },
 
         ugc_brief: async (args) => {
-          return {
-            action: 'ugc_brief',
-            brand: args.brand,
-            product: args.product,
-            objective: args.objective,
-            platform: args.platform,
-            duration: args.duration ?? '30s',
-            instructions: `Genera un brief profesional de UGC para:
+          const prompt = `Genera un brief profesional de UGC para:
 Marca: "${args.brand}"
 Producto: "${args.product}"
 Objetivo: "${args.objective}"
@@ -279,7 +296,20 @@ El brief debe incluir:
 8. Entregables: formato, resolución, archivos requeridos
 9. Deadline y proceso de revisión
 
-Redactar en español, tono profesional pero accesible para creators independientes.`,
+Redactar en español, tono profesional pero accesible para creators independientes.`;
+
+          const response = await callLLM(
+            [{ role: 'user', content: prompt }],
+            { maxTokens: 4000, temperature: 0.6 },
+          );
+
+          return {
+            brief: response.text,
+            brand: args.brand,
+            product: args.product,
+            objective: args.objective,
+            platform: args.platform,
+            duration: args.duration ?? '30s',
           };
         },
       },

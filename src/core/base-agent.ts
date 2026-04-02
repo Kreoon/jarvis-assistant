@@ -1,6 +1,7 @@
 import { callLLM } from './llm.js';
 import { matchSkills, formatSkillsForPrompt } from './skill-loader.js';
 import { agentLogger } from '../shared/logger.js';
+import { delegateToOpenClaw, isOpenClawConnected } from '../connectors/openclaw.js';
 import type {
   AgentName,
   AgentRequest,
@@ -58,6 +59,27 @@ const TOOL_PROGRESS: Record<string, { start: string; done: string }> = {
   // Core
   route_to_agent: { start: '🔀 Delegando al agente especializado...', done: '' },
   transcribe_audio: { start: '🎤 Transcribiendo audio...', done: '✅ Audio transcrito' },
+  // OpenClaw — universal
+  openclaw_query: { start: '🦾 Delegando a OpenClaw...', done: '✅ OpenClaw respondió' },
+};
+
+// Universal OpenClaw tool definition — inyectada automáticamente en todos los agentes
+const OPENCLAW_TOOL: LLMTool = {
+  name: 'openclaw_query',
+  description:
+    'Delega una tarea a OpenClaw (IA con acceso a browser, web scraping, y 5700+ skills). ' +
+    'Úsalo para: búsquedas web avanzadas, automatización de browser, scraping de páginas, ' +
+    'o cualquier capacidad que no tengas directamente.',
+  parameters: {
+    type: 'object',
+    properties: {
+      task: {
+        type: 'string',
+        description: 'Descripción de la tarea a delegar a OpenClaw en lenguaje natural',
+      },
+    },
+    required: ['task'],
+  },
 };
 
 export interface AgentConfig {
@@ -107,9 +129,16 @@ export abstract class BaseAgent {
       }
     }
 
+    // Build the effective tool list: agent tools + universal OpenClaw tool
+    // Only inject OpenClaw if it is not already defined by the agent to avoid duplicates
+    const agentToolNames = new Set(this.config.tools.map(t => t.name));
+    const effectiveTools: LLMTool[] = agentToolNames.has('openclaw_query')
+      ? this.config.tools
+      : [...this.config.tools, OPENCLAW_TOOL];
+
     // Tool use loop
     let iteration = 0;
-    const maxIterations = this.config.maxIterations ?? 5;
+    const maxIterations = this.config.maxIterations ?? 10;
 
     while (iteration < maxIterations) {
       iteration++;
@@ -119,7 +148,7 @@ export abstract class BaseAgent {
       }
 
       const response = await callLLM(messages, {
-        tools: this.config.tools.length ? this.config.tools : undefined,
+        tools: effectiveTools.length ? effectiveTools : undefined,
         provider: this.config.provider,
         model: this.config.model,
         maxTokens: this.config.maxTokens,
@@ -133,6 +162,40 @@ export abstract class BaseAgent {
       // Execute tool calls with progress reporting
       const toolResults: string[] = [];
       for (const call of response.toolCalls) {
+        // --- Universal OpenClaw handler (BaseAgent level) ---
+        if (call.name === 'openclaw_query') {
+          const progress = TOOL_PROGRESS['openclaw_query'];
+          if (onProgress && progress?.start) {
+            await onProgress(progress.start).catch(() => {});
+          }
+
+          if (!isOpenClawConnected()) {
+            this.log.warn('openclaw_query called but OpenClaw is not connected');
+            toolResults.push(JSON.stringify({ error: 'OpenClaw no está conectado en este momento' }));
+          } else {
+            try {
+              const result = await delegateToOpenClaw(call.args.task as string, {
+                agent: this.config.name,
+                from: req.member.name,
+              });
+              toolResults.push(JSON.stringify({ result }));
+
+              if (onProgress && progress?.done) {
+                await onProgress(progress.done).catch(() => {});
+              }
+            } catch (err: any) {
+              this.log.error({ error: err.message }, 'OpenClaw delegation failed');
+              toolResults.push(JSON.stringify({ error: err.message }));
+
+              if (onProgress) {
+                await onProgress(`❌ Error en OpenClaw: ${err.message.slice(0, 100)}`).catch(() => {});
+              }
+            }
+          }
+          continue;
+        }
+
+        // --- Agent-specific handler ---
         const handler = this.config.toolHandlers[call.name];
         if (!handler) {
           toolResults.push(`Error: tool "${call.name}" not found`);

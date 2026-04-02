@@ -1,5 +1,8 @@
 import express from 'express';
+import cors from 'cors';
 import axios from 'axios';
+import fs from 'fs';
+import crypto from 'crypto';
 import { config, team } from './shared/config.js';
 import { logger } from './shared/logger.js';
 import { routeMessage } from './core/router.js';
@@ -10,10 +13,46 @@ import { saveAccount } from './shared/google-api.js';
 import type { WAMessage, AgentRequest, ConversationContext } from './shared/types.js';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+app.use(cors());
 
-// === Conversation history (in-memory, last 20 per user) ===
-const conversations = new Map<string, ConversationContext>();
+// === Auth Middleware for Web Platform ===
+const webAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader === `Bearer ${config.webPlatformToken}`) {
+    return next();
+  }
+  res.status(401).json({ error: 'Unauthorized. Stark Industries credentials required.' });
+};
+
+// === Conversation persistence ===
+const CONVERSATIONS_FILE = '/app/data/conversations.json';
+
+function loadConversations(): Map<string, ConversationContext> {
+  try {
+    const data = fs.readFileSync(CONVERSATIONS_FILE, 'utf-8');
+    const parsed = JSON.parse(data);
+    return new Map(Object.entries(parsed));
+  } catch {
+    return new Map();
+  }
+}
+
+let saveTimer: NodeJS.Timeout | null = null;
+function saveConversations(): void {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    const obj = Object.fromEntries(conversations);
+    fs.writeFileSync(CONVERSATIONS_FILE, JSON.stringify(obj), 'utf-8');
+    saveTimer = null;
+  }, 5000);
+}
+
+const conversations = loadConversations();
 
 function getContext(phone: string): ConversationContext {
   if (!conversations.has(phone)) {
@@ -28,6 +67,7 @@ function addToContext(phone: string, role: 'user' | 'assistant', content: string
   if (ctx.recentMessages.length > 20) {
     ctx.recentMessages = ctx.recentMessages.slice(-20);
   }
+  saveConversations();
 }
 
 // === Webhook verification ===
@@ -49,6 +89,20 @@ const processing = new Set<string>();
 
 // === Webhook receiver ===
 app.post('/webhook', async (req, res) => {
+  // Validate HMAC signature from Meta
+  const signature = req.headers['x-hub-signature-256'] as string;
+  if (signature && config.wa.appSecret) {
+    const rawBody = (req as any).rawBody as Buffer;
+    const expected = 'sha256=' + crypto
+      .createHmac('sha256', config.wa.appSecret)
+      .update(rawBody)
+      .digest('hex');
+    if (signature !== expected) {
+      logger.warn({ signature }, 'Invalid webhook signature');
+      return res.sendStatus(401);
+    }
+  }
+
   // Respond immediately
   res.sendStatus(200);
 
@@ -245,12 +299,109 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// === Scheduler status ===
-app.get('/scheduler', (_req, res) => {
+// === Web Platform API ===
+
+// System Status (HUD Diagnostic)
+app.get('/api/status', webAuth, (_req, res) => {
   res.json({
-    jobs: getJobs(),
+    status: 'online',
+    system: 'JARVIS-V2',
+    uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    agents: [
+      { name: 'core', status: 'active', desc: 'Central Processing Unit' },
+      { name: 'memory', status: 'active', desc: 'LTM & Context Retrieval' },
+      { name: 'content', status: 'active', desc: 'Creative Content Engine' },
+      { name: 'ops', status: 'active', desc: 'Operational Skills & Tools' },
+      { name: 'analyst', status: 'active', desc: 'Social Data Analyst' },
+      { name: 'engine', status: 'active', desc: 'Daily Intelligence Engine' },
+    ],
+    memory: process.memoryUsage(),
+    cpu: process.cpuUsage(),
   });
+});
+
+// Chat Interface
+app.post('/api/chat', webAuth, async (req, res) => {
+  const { message, from = '573132947776' } = req.body;
+  
+  if (!message) {
+    return res.status(400).json({ error: 'Message payload missing.' });
+  }
+
+  const member = team[from] || team['573132947776'];
+  const messageId = `web_${Date.now()}`;
+
+  const waMessage: WAMessage = {
+    from,
+    name: member.name,
+    type: 'text',
+    text: message,
+    timestamp: Date.now(),
+    messageId,
+  };
+
+  addToContext(from, 'user', message);
+
+  const agentReq: AgentRequest = {
+    agent: 'core',
+    message: waMessage,
+    member,
+    context: getContext(from),
+  };
+
+  try {
+    const response = await routeMessage(agentReq);
+    addToContext(from, 'assistant', response.text);
+    res.json({
+      id: messageId,
+      response: response.text,
+      timestamp: Date.now(),
+    });
+  } catch (err: any) {
+    logger.error({ error: err.message }, 'Web API Chat error');
+    res.status(500).json({ error: 'JARVIS core encountered an internal error.' });
+  }
+});
+
+// Reports Browser (Engine Output)
+app.get('/api/reports', webAuth, async (_req, res) => {
+  try {
+    const couchUrl = config.couchdb.url || 'http://couchdb:5984';
+    const obsidianDb = process.env.OBSIDIAN_DB || 'obsidian-vault';
+    const auth = config.couchdb.user
+      ? { Authorization: `Basic ${Buffer.from(`${config.couchdb.user}:${config.couchdb.pass}`).toString('base64')}` }
+      : {};
+
+    const { data } = await axios.get(`${couchUrl}/${obsidianDb}/_all_docs`, {
+      params: {
+        include_docs: true,
+        startkey: '"jarvis_daily-engine_"',
+        endkey: '"jarvis_daily-engine_\ufff0"',
+      },
+      headers: { ...auth },
+    });
+
+    const reports = data.rows.map((row: any) => ({
+      id: row.id,
+      date: row.id.split('_').pop()?.replace('.md', ''),
+      content: row.doc.content,
+      updatedAt: row.doc.updatedAt,
+    })).sort((a: any, b: any) => b.id.localeCompare(a.id));
+
+    res.json(reports);
+  } catch (err: any) {
+    logger.error({ error: err.message }, 'Failed to fetch reports from CouchDB');
+    res.json([]); // Return empty list on failure
+  }
+});
+
+// === Graceful shutdown: persist conversations before Docker stops the process ===
+process.on('SIGTERM', () => {
+  if (saveTimer) clearTimeout(saveTimer);
+  const obj = Object.fromEntries(conversations);
+  fs.writeFileSync(CONVERSATIONS_FILE, JSON.stringify(obj), 'utf-8');
+  process.exit(0);
 });
 
 // === Start server ===

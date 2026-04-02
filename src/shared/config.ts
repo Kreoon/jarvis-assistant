@@ -4,6 +4,7 @@ export const config = {
   port: Number(process.env.PORT) || 3000,
   env: process.env.NODE_ENV || 'development',
   webhookVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'jarvis-kreoon-2024',
+  webPlatformToken: process.env.JARVIS_WEB_TOKEN || 'stark-industries-access-2024',
 
   wa: {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID!,

@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  --background: #000810;
+  --foreground: #ffffff;
+  --jarvis-cyan: #00e5ff;
+  --jarvis-blue: #0077ff;
+  --jarvis-glass: rgba(0, 20, 40, 0.6);
+  --jarvis-glow: 0 0 15px rgba(0, 229, 255, 0.4);
+  --font-mono: "Share Tech Mono", "Orbitron", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-jarvis-cyan: var(--jarvis-cyan);
+  --color-jarvis-blue: var(--jarvis-blue);
+  --color-jarvis-glass: var(--jarvis-glass);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  background-image: 
+    radial-gradient(circle at 50% 50%, rgba(0, 119, 255, 0.1) 0%, transparent 80%),
+    linear-gradient(rgba(0, 229, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+}
+
+/* Ironman HUD Animations */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+.scanline {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(to bottom, transparent, var(--jarvis-cyan), transparent);
+  opacity: 0.1;
+  animation: scanline 8s linear infinite;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.glass-panel {
+  background: var(--jarvis-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  box-shadow: var(--jarvis-glow);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(45deg, transparent 48%, rgba(0, 229, 255, 0.1) 50%, transparent 52%);
+  background-size: 200% 200%;
+  animation: shine 10s infinite linear;
+  pointer-events: none;
+}
+
+@keyframes shine {
+  0% { background-position: -200% -200%; }
+  100% { background-position: 200% 200%; }
+}
+
+.hud-border {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--jarvis-cyan);
+  border-style: solid;
+}
+
+.hud-tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.hud-tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.hud-bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+.hud-br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+.glowing-text {
+  text-shadow: 0 0 10px var(--jarvis-cyan);
+}
