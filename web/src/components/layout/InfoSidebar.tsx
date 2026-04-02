@@ -43,25 +43,28 @@ function formatEventDate(dateStr: string): string {
 }
 
 // Interpreta el status de la API para extraer providers
+// Backend sends: { providers: { anthropic: true, gemini: true, openai: true, ... } }
 function parseProviders(statusRaw: unknown): ProviderStatus[] {
   if (!statusRaw || typeof statusRaw !== "object") {
     return DEFAULT_PROVIDERS;
   }
 
   const s = statusRaw as Record<string, unknown>;
+  // Providers can be at root level or nested under .providers
+  const p = (typeof s.providers === "object" && s.providers !== null ? s.providers : s) as Record<string, unknown>;
 
   const providerMap: { label: string; keys: string[] }[] = [
     { label: "OAI", keys: ["openai", "openAI", "oai"] },
     { label: "ANT", keys: ["anthropic", "claude", "ant"] },
-    { label: "GGL", keys: ["google", "gemini", "ggl"] },
-    { label: "DB", keys: ["db", "database", "couchdb", "supabase"] },
-    { label: "META", keys: ["meta", "whatsapp", "facebook"] },
-    { label: "CAL", keys: ["calendar", "gcal", "googleCalendar"] },
+    { label: "GGL", keys: ["gemini", "google", "ggl"] },
+    { label: "11L", keys: ["elevenlabs", "tts"] },
+    { label: "PPX", keys: ["perplexity", "search"] },
+    { label: "DB", keys: ["db", "database", "couchdb"] },
   ];
 
   return providerMap.map(({ label, keys }) => {
-    const found = keys.find((k) => k in s);
-    const up = found ? Boolean(s[found]) : false;
+    const found = keys.find((k) => k in p);
+    const up = found ? Boolean(p[found]) : false;
     return { label, key: found ?? keys[0], up };
   });
 }

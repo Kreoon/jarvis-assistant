@@ -26,31 +26,19 @@ interface JobDisplay {
 }
 
 function parseMetrics(raw: MetricsData): MetricsDisplay {
-  const memRss =
-    typeof raw.memoryRss === "number"
-      ? raw.memoryRss
-      : typeof (raw as Record<string, unknown>)["process.memoryUsage.rss"] === "number"
-      ? (raw as Record<string, unknown>)["process.memoryUsage.rss"] as number
-      : null;
+  // Backend sends: { memory: { rss, heapTotal, ... }, cpu: { user, system }, uptime: number }
+  const mem = raw.memory as Record<string, unknown> | undefined;
+  const memRss = mem && typeof mem.rss === "number" ? mem.rss : null;
 
-  const uptime =
-    typeof raw.uptime === "number"
-      ? raw.uptime
-      : typeof (raw as Record<string, unknown>).uptimeSeconds === "number"
-      ? (raw as Record<string, unknown>).uptimeSeconds as number
-      : null;
+  const uptime = typeof raw.uptime === "number" ? raw.uptime : null;
 
-  const cpu =
-    typeof raw.cpu === "number"
-      ? raw.cpu
-      : typeof (raw as Record<string, unknown>)["process.cpuUsage"] === "number"
-      ? (raw as Record<string, unknown>)["process.cpuUsage"] as number
-      : null;
+  const cpuObj = raw.cpu as Record<string, unknown> | undefined;
+  const cpuUser = cpuObj && typeof cpuObj.user === "number" ? cpuObj.user : null;
 
   return {
     memoryMB: memRss !== null ? `${(memRss / 1024 / 1024).toFixed(1)} MB` : "—",
     uptimeHours: uptime !== null ? `${(uptime / 3600).toFixed(2)} H` : "—",
-    cpu: cpu !== null ? `${(cpu as number).toFixed(1)}%` : "—",
+    cpu: cpuUser !== null ? `${(cpuUser / 1000000).toFixed(1)}s` : "—",
   };
 }
 

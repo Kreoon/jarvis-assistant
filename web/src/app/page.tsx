@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity,
@@ -60,6 +60,8 @@ function JarvisApp({ token }: { token: string }) {
   // Live transcript for overlay
   const [liveTranscript, setLiveTranscript] = useState("");
   const [jarvisResponse, setJarvisResponse] = useState("");
+  const [voiceActive, setVoiceActive] = useState(false);
+  const lastTranscriptRef = useRef("");
 
   // Fetch status on mount
   useEffect(() => {
@@ -75,7 +77,10 @@ function JarvisApp({ token }: { token: string }) {
 
   // When final transcript arrives, process it
   useEffect(() => {
-    if (!transcript || !isListening) return;
+    // Only process if we have a NEW non-empty transcript and we're actually listening
+    if (!transcript || transcript === lastTranscriptRef.current) return;
+    if (!voiceActive) return;
+    lastTranscriptRef.current = transcript;
 
     const processVoice = async () => {
       dispatch({ type: "START_PROCESSING" });
@@ -83,30 +88,29 @@ function JarvisApp({ token }: { token: string }) {
       setJarvisResponse("");
 
       try {
-        // Stream chat response
-        let fullResponse = "";
         const controller = api.chatStream(
           transcript,
           (progress) => {
-            // Progress messages from agent
             setJarvisResponse(progress);
           },
           (complete) => {
-            fullResponse = complete;
             setJarvisResponse(complete);
 
-            // Speak the response if voice is enabled
             if (voiceEnabled) {
               dispatch({ type: "START_SPEAKING" });
               speak(complete).then(() => {
                 dispatch({ type: "STOP_SPEAKING" });
                 setJarvisResponse("");
                 setLiveTranscript("");
+                setVoiceActive(false);
               }).catch(() => {
                 dispatch({ type: "STOP_SPEAKING" });
+                setVoiceActive(false);
               });
             } else {
-              dispatch({ type: "STOP_SPEAKING" });
+              // Can't go from processing -> idle via STOP_SPEAKING, use CANCEL
+              dispatch({ type: "CANCEL" });
+              setVoiceActive(false);
               setTimeout(() => {
                 setJarvisResponse("");
                 setLiveTranscript("");
@@ -117,16 +121,18 @@ function JarvisApp({ token }: { token: string }) {
       } catch (err) {
         dispatch({ type: "ERROR", payload: String(err) });
         setJarvisResponse("Uy parce, hubo un error procesando eso.");
+        setVoiceActive(false);
         setTimeout(() => setJarvisResponse(""), 3000);
       }
     };
 
     processVoice();
-  }, [transcript]);
+  }, [transcript, voiceActive]);
 
   // Handle mic toggle
   const handleMicToggle = useCallback(() => {
     if (isIdle) {
+      setVoiceActive(true);
       dispatch({ type: "START_LISTENING" });
       startListening();
     } else if (isListening) {
@@ -134,6 +140,7 @@ function JarvisApp({ token }: { token: string }) {
       stopListening();
     } else if (isSpeaking) {
       // Barge-in
+      setVoiceActive(true);
       dispatch({ type: "BARGE_IN" });
       stopSpeaking();
       startListening();
