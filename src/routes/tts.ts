@@ -16,7 +16,9 @@ router.post('/', async (req, res) => {
     return res.status(503).json({ error: 'ElevenLabs not configured.' });
   }
 
-  const voiceId = voice_id || config.elevenlabs.kiroVoiceId || 'EXAVITQu4vr4xnSDxMaL'; // Default: Bella
+  // Adam voice ID - deep, confident, JARVIS-like
+  const ADAM_VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
+  const voiceId = voice_id || ADAM_VOICE_ID;
 
   try {
     const response = await fetch(
@@ -34,6 +36,7 @@ router.post('/', async (req, res) => {
             stability: 0.5,
             similarity_boost: 0.75,
             style: 0.3,
+            speed: 1.2,
           },
         }),
       },
