@@ -40,112 +40,133 @@ function JarvisApp({ token }: { token: string }) {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [status, setStatus] = useState<any>(null);
 
-  // Speech Recognition
+  // Web Speech API - only for live visual transcript feedback
   const {
-    start: startListening,
-    stop: stopListening,
-    transcript,
+    start: startWebSpeech,
+    stop: stopWebSpeech,
     interimTranscript,
     isSupported: sttSupported,
   } = useSpeechRecognition();
 
-  // Text-to-Speech (needs token string, not API instance)
+  // Text-to-Speech via ElevenLabs
   const {
     speak,
     stop: stopSpeaking,
-    isSpeaking: ttsPlaying,
-    analyserNode,
   } = useTextToSpeech(token);
+
+  // MediaRecorder for Whisper STT
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Live transcript for overlay
   const [liveTranscript, setLiveTranscript] = useState("");
   const [jarvisResponse, setJarvisResponse] = useState("");
-  const [voiceActive, setVoiceActive] = useState(false);
-  const lastTranscriptRef = useRef("");
 
   // Fetch status on mount
   useEffect(() => {
     api.getStatus().then(setStatus).catch(() => {});
   }, [api]);
 
-  // Sync interim transcript to live display
+  // Sync Web Speech interim transcript to live display (visual only)
   useEffect(() => {
     if (interimTranscript) {
       setLiveTranscript(interimTranscript);
     }
   }, [interimTranscript]);
 
-  // When final transcript arrives, process it
-  useEffect(() => {
-    // Only process if we have a NEW non-empty transcript and we're actually listening
-    if (!transcript || transcript === lastTranscriptRef.current) return;
-    if (!voiceActive) return;
-    lastTranscriptRef.current = transcript;
+  // Start recording audio for Whisper
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      audioChunksRef.current = [];
 
-    const processVoice = async () => {
-      dispatch({ type: "START_PROCESSING" });
-      setLiveTranscript(transcript);
-      setJarvisResponse("");
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
 
-      try {
-        const controller = api.chatStream(
-          transcript,
-          (progress) => {
-            setJarvisResponse(progress);
-          },
-          (complete) => {
-            setJarvisResponse(complete);
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks
+        stream.getTracks().forEach(t => t.stop());
 
-            if (voiceEnabled) {
-              dispatch({ type: "START_SPEAKING" });
-              speak(complete).then(() => {
-                dispatch({ type: "STOP_SPEAKING" });
-                setJarvisResponse("");
-                setLiveTranscript("");
-                setVoiceActive(false);
-              }).catch(() => {
-                dispatch({ type: "STOP_SPEAKING" });
-                setVoiceActive(false);
-              });
-            } else {
-              // Can't go from processing -> idle via STOP_SPEAKING, use CANCEL
-              dispatch({ type: "CANCEL" });
-              setVoiceActive(false);
-              setTimeout(() => {
-                setJarvisResponse("");
-                setLiveTranscript("");
-              }, 5000);
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        if (audioBlob.size < 1000) {
+          // Too short, ignore
+          dispatch({ type: "CANCEL" });
+          return;
+        }
+
+        // Send to Whisper for transcription + response
+        dispatch({ type: "START_PROCESSING" });
+        setJarvisResponse("");
+
+        try {
+          const result = await api.sendAudio(audioBlob);
+          const transcription = result.transcription || "";
+          const response = result.response || "No obtuve respuesta.";
+
+          setLiveTranscript(transcription);
+          setJarvisResponse(response);
+
+          // Speak response with ElevenLabs
+          if (voiceEnabled && response) {
+            dispatch({ type: "START_SPEAKING" });
+            try {
+              await speak(response);
+              dispatch({ type: "STOP_SPEAKING" });
+            } catch {
+              // ElevenLabs failed, still show text response
+              dispatch({ type: "STOP_SPEAKING" });
             }
+          } else {
+            dispatch({ type: "CANCEL" });
           }
-        );
-      } catch (err) {
-        dispatch({ type: "ERROR", payload: String(err) });
-        setJarvisResponse("Uy parce, hubo un error procesando eso.");
-        setVoiceActive(false);
-        setTimeout(() => setJarvisResponse(""), 3000);
-      }
-    };
+        } catch (err) {
+          console.error("[Voice] Error:", err);
+          dispatch({ type: "ERROR", payload: String(err) });
+          setJarvisResponse("Uy parce, hubo un error.");
+        } finally {
+          setTimeout(() => {
+            setJarvisResponse("");
+            setLiveTranscript("");
+          }, 4000);
+        }
+      };
 
-    processVoice();
-  }, [transcript, voiceActive]);
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(250); // Collect chunks every 250ms
+    } catch (err) {
+      console.error("[Voice] Mic access error:", err);
+      dispatch({ type: "ERROR", payload: "No se pudo acceder al microfono" });
+    }
+  }, [api, dispatch, speak, voiceEnabled]);
 
-  // Handle mic toggle
+  // Stop recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
+
+  // Handle mic toggle - records audio for Whisper
   const handleMicToggle = useCallback(() => {
     if (isIdle) {
-      setVoiceActive(true);
       dispatch({ type: "START_LISTENING" });
-      startListening();
+      startRecording();
+      // Also start Web Speech for live visual transcript
+      if (sttSupported) startWebSpeech();
     } else if (isListening) {
       dispatch({ type: "STOP_LISTENING" });
-      stopListening();
+      stopRecording();
+      if (sttSupported) stopWebSpeech();
     } else if (isSpeaking) {
-      // Barge-in
-      setVoiceActive(true);
+      // Barge-in: stop speaking, start listening again
       dispatch({ type: "BARGE_IN" });
       stopSpeaking();
-      startListening();
+      startRecording();
+      if (sttSupported) startWebSpeech();
     }
-  }, [isIdle, isListening, isSpeaking, dispatch, startListening, stopListening, stopSpeaking]);
+  }, [isIdle, isListening, isSpeaking, dispatch, startRecording, stopRecording, startWebSpeech, stopWebSpeech, stopSpeaking, sttSupported]);
 
   return (
     <main className="h-screen w-screen p-4 flex gap-4 overflow-hidden relative">
@@ -241,7 +262,7 @@ function JarvisApp({ token }: { token: string }) {
                 >
                   <ChatPanel api={api} />
                   {/* Floating mic button */}
-                  {sttSupported && voiceEnabled && (
+                  {voiceEnabled && (
                     <div className="absolute bottom-20 right-4 z-20">
                       <MicButton onToggle={handleMicToggle} />
                     </div>
@@ -289,7 +310,7 @@ function JarvisApp({ token }: { token: string }) {
       />
 
       {/* Global mic button (all tabs except chat which has its own) */}
-      {sttSupported && voiceEnabled && activeTab !== "chat" && (
+      {voiceEnabled && activeTab !== "chat" && (
         <div className="fixed bottom-8 right-8 z-30">
           <MicButton onToggle={handleMicToggle} />
         </div>
