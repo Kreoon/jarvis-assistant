@@ -65,53 +65,89 @@ async function sendVoiceUpdate(
   phone: string,
 ): Promise<void> {
   try {
-    // Generate a conversational summary for TTS
-    const voiceResponse = await callLLM(
+    // Generate multiple voice segments as separate audio notes
+    const segmentsResponse = await callLLM(
       [
         {
           role: 'system',
-          content: `Eres Jarvis, el asistente de Alexander Cast. Vas a grabar un audio de WhatsApp de máximo 45 segundos.
+          content: `Eres Jarvis, el asistente de Alexander Cast. Genera notas de voz para WhatsApp.
 
-Estilo: Como un parcero que te cuenta las noticias del día tomando café. Natural, directo, con energía pero sin gritar. Colombiano.
+Genera un JSON array con 3-4 segmentos. Cada segmento es una nota de voz independiente.
 
-Estructura:
-1. Saludo rápido (3s): "Quiubo Alex, te cuento lo de hoy..."
-2. Top 3-4 nuggets más importantes (30s): Los datos más impactantes de emails y tendencias
-3. Cierre (5s): "Ya te tengo los guiones listos, revísalos"
+SEGMENTO 1 — SALUDO + RESUMEN GENERAL (300-500 chars)
+"Quiubo Alex..." + panorama general de lo que encontraste hoy.
+
+SEGMENTO 2 — NUGGETS DE IA Y TECNOLOGIA (400-600 chars)
+Noticias impactantes de IA y tecnologia. Datos especificos, nombres, numeros. Desarrolla cada punto.
+
+SEGMENTO 3 — NUGGETS DE NEGOCIOS Y EMPRENDIMIENTO (400-600 chars)
+Lo mas relevante de negocios, startups, automatizacion. Con contexto y opinion.
+
+SEGMENTO 4 — CIERRE Y ANTICIPO (200-400 chars)
+"Con todo esto te arme 3 guiones..." + anticipo de que van + CTA para que los revise.
+
+ESTILO: Parcero colombiano contando noticias. Natural, directo, con energia.
 
 REGLAS:
-- NO uses formato markdown, bullets, ni asteriscos — esto se va a LEER EN VOZ ALTA
-- Usa lenguaje hablado natural, con conectores ("mira que...", "otra cosa...", "y lo más loco es que...")
-- Menciona datos específicos (números, nombres, herramientas)
-- Máximo 400 caracteres para que quede en ~45 segundos`,
+- NO markdown, NO bullets, NO asteriscos — se lee EN VOZ ALTA
+- Lenguaje hablado: "mira que...", "lo mas loco es que...", "y ojo con esto..."
+- Datos especificos siempre (numeros, nombres de empresas, herramientas)
+- Cada segmento COMPLETO y autocontenido
+
+RESPONDE SOLO en JSON array de strings:
+["texto segmento 1", "texto segmento 2", "texto segmento 3", "texto segmento 4"]`,
         },
         {
           role: 'user',
-          content: `Fecha: ${date}\n\nNUGGETS DE EMAILS:\n${emailSummary.slice(0, 1500)}\n\nTENDENCIAS WEB:\n${webTrends.slice(0, 1500)}\n\nGenera el texto para el audio. Solo el texto, nada más.`,
+          content: `Fecha: ${date}\n\nNUGGETS DE EMAILS:\n${emailSummary.slice(0, 2000)}\n\nTENDENCIAS WEB:\n${webTrends.slice(0, 2000)}\n\nGenera los 3-4 segmentos de audio. Solo JSON array de strings.`,
         },
       ],
-      { provider: 'gemini', maxTokens: 500 },
+      { maxTokens: 3000 },
     );
 
-    const voiceText = voiceResponse.text?.trim();
-    if (!voiceText) return;
-
-    // Generate audio with ElevenLabs
-    const audio = await generateSpeech(voiceText, `jarvis-briefing-${date}.mp3`);
-
-    if (audio?.url) {
-      // Send audio message via WhatsApp
-      await sendMedia(phone, {
-        type: 'audio',
-        url: audio.url,
-        mimeType: 'audio/mpeg',
-      });
-      logger.info({ phone }, 'Voice briefing sent via WhatsApp');
-    } else {
-      // Fallback: send as text if TTS fails
-      await sendText(phone, voiceText);
-      logger.warn('TTS failed, sent voice update as text');
+    // Parse segments
+    let segments: string[] = [];
+    try {
+      let jsonStr = segmentsResponse.text?.trim() || '[]';
+      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) jsonStr = jsonMatch[1].trim();
+      const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
+      if (arrayMatch) jsonStr = arrayMatch[0];
+      segments = JSON.parse(jsonStr);
+    } catch {
+      // Fallback: use full text as one segment
+      if (segmentsResponse.text) {
+        segments = [segmentsResponse.text.trim()];
+      }
     }
+
+    if (segments.length === 0) return;
+
+    logger.info({ segmentCount: segments.length, totalChars: segments.reduce((a, s) => a + s.length, 0) }, 'Voice segments ready');
+
+    // Generate and send each segment as separate audio
+    for (let i = 0; i < segments.length; i++) {
+      const text = segments[i];
+      if (!text || text.length < 20) continue;
+
+      const audio = await generateSpeech(text, `jarvis-briefing-${date}-${Date.now()}-${i + 1}.mp3`);
+
+      if (audio?.url) {
+        await sendMedia(phone, {
+          type: 'audio',
+          url: audio.url,
+          mimeType: 'audio/mpeg',
+        });
+        logger.info({ phone, segment: i + 1, textLength: text.length }, 'Voice segment sent');
+        // Delay between audios so they arrive in order
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      } else {
+        await sendText(phone, text);
+        logger.warn({ segment: i + 1 }, 'TTS failed for segment, sent as text');
+      }
+    }
+
+    logger.info({ phone, segments: segments.length }, 'All voice segments sent');
   } catch (error: any) {
     logger.warn({ error: error.message }, 'Voice update failed, continuing with scripts');
   }
@@ -178,7 +214,7 @@ Formato: 5-10 nuggets con el DATO CONCRETO y relevancia. Español.`,
         },
         { role: 'user', content: emailData },
       ],
-      { provider: 'gemini', maxTokens: 2000 },
+      { maxTokens: 2000 },
     );
 
     return {
@@ -228,7 +264,7 @@ Para cada uno: DATO CONCRETO + por qué importa a emprendedores/marketers/creado
         },
         { role: 'user', content: combined.slice(0, 8000) },
       ],
-      { provider: 'gemini', maxTokens: 2000 },
+      { maxTokens: 2000 },
     );
 
     return consolidation.text || 'Tendencias procesadas sin resumen.';
@@ -271,7 +307,7 @@ JSON array:
         content: `📧 NEWSLETTERS:\n${emailSummary}\n\n🌐 TENDENCIAS:\n${webTrends}\n\nSelecciona ${maxIdeas} temas. Solo JSON array.`,
       },
     ],
-    { provider: 'gemini', maxTokens: 2000, temperature: 0.8 },
+    { maxTokens: 2000, temperature: 0.8 },
   );
 
   try {
@@ -376,28 +412,42 @@ RESPONDE SOLO en JSON:
         content: `TEMA: ${idea.title}\nÁNGULO: ${idea.angle}\nPOR QUÉ HOY: ${idea.whyToday}\nPLATAFORMA: ${idea.platform}\nVIRAL SCORE: ${idea.viralScore}/10\n\nEscribe el guión completo con las 3 dimensiones. Solo JSON.`,
       },
     ],
-    { provider: 'gemini', maxTokens: 6000, temperature: 0.7 },
+    { maxTokens: 8000, temperature: 0.7 },
   );
 
+  // Parse JSON response — handle truncated or wrapped JSON
+  const raw = response.text.trim();
+
+  // Try full JSON parse first
   try {
-    let jsonStr = response.text.trim();
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+    let jsonStr = raw;
+    // Strip markdown code blocks
+    const lines = jsonStr.split('\n').filter(l => !l.trim().startsWith('```'));
+    jsonStr = lines.join('\n').trim();
     const objMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (objMatch) jsonStr = objMatch[0];
     return JSON.parse(jsonStr) as VideoScript;
   } catch {
-    return {
-      hook: idea.title,
-      duration: '60s',
-      voiceScript: response.text.slice(0, 3000),
-      visualScript: 'Ver guión de voz para referencia',
-      editingScript: 'Jump cuts cada 2-3s, subtítulos estilo Hormozi, SFX en datos clave',
-      caption: idea.angle,
-      hashtags: '#IA #EstrategiaDigital #Emprendimiento #AlexanderCast',
-      cta: 'Sígueme para más contenido como este',
-    };
+    // JSON might be truncated — extract fields with regex
+    logger.warn({ idea: idea.title }, 'JSON parse failed, extracting fields with regex');
   }
+
+  function extractField(text: string, field: string): string {
+    const regex = new RegExp('"' + field + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"');
+    const match = text.match(regex);
+    return match ? match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '\t') : '';
+  }
+
+  return {
+    hook: extractField(raw, 'hook') || idea.title,
+    duration: (extractField(raw, 'duration') as VideoScript['duration']) || '60s',
+    voiceScript: extractField(raw, 'voiceScript') || 'Guión no disponible',
+    visualScript: extractField(raw, 'visualScript') || 'Guión visual no disponible',
+    editingScript: extractField(raw, 'editingScript') || 'Instrucciones de edición no disponibles',
+    caption: extractField(raw, 'caption') || idea.angle,
+    hashtags: extractField(raw, 'hashtags') || '#IA #EstrategiaDigital #Emprendimiento #AlexanderCast',
+    cta: extractField(raw, 'cta') || 'Sígueme para más contenido como este',
+  };
 }
 
 function getEmptyScript(): VideoScript {

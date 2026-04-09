@@ -1,33 +1,19 @@
-import axios from 'axios';
+import fs from 'fs';
 import { logger } from '../shared/logger.js';
 import type { DailyReport } from '../shared/types.js';
 
-const REPORTS_API = 'https://kreoon-reports-v2.vercel.app/api/reports';
+const REPORTS_DIR = '/app/data/reports';
 
 export async function postDailyReport(report: DailyReport): Promise<string | null> {
   try {
-    const { data } = await axios.post(
-      REPORTS_API,
-      {
-        type: 'daily-briefing',
-        date: report.date,
-        data: report,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 15000,
-      },
-    );
-
-    const url = data?.url || (data?.id
-      ? `${REPORTS_API.replace('/api/reports', '')}/reports/${data.id}`
-      : null);
-
-    logger.info({ reportId: data?.id, url }, 'Daily briefing posted to web app');
+    fs.mkdirSync(REPORTS_DIR, { recursive: true });
+    const id = `briefing-${report.date}`;
+    fs.writeFileSync(`${REPORTS_DIR}/${id}.json`, JSON.stringify(report, null, 2));
+    const url = `https://jarvis.kreoon.com/report/${id}`;
+    logger.info({ id, url }, 'Daily briefing saved');
     return url;
   } catch (error: any) {
-    logger.warn({ error: error.message }, 'Failed to post report to web app');
+    logger.warn({ error: error.message }, 'Failed to save report');
     return null;
   }
 }
@@ -61,31 +47,24 @@ export function formatReportMarkdown(report: DailyReport): string {
     lines.push(`**Por qué hoy:** ${idea.whyToday}`);
     lines.push(`**Plataforma:** ${idea.platform} | **Viral Score:** ${idea.viralScore}/10 | **Duración:** ${s.duration}`);
     lines.push('');
-
     lines.push('### Hook');
     lines.push(`> ${s.hook}`);
     lines.push('');
-
     lines.push('### Guión de Voz');
     lines.push(s.voiceScript);
     lines.push('');
-
     lines.push('### Guión Visual');
     lines.push(s.visualScript);
     lines.push('');
-
     lines.push('### Guión de Edición');
     lines.push(s.editingScript);
     lines.push('');
-
     lines.push('### Caption');
     lines.push(s.caption);
     lines.push('');
-
     lines.push('### Hashtags');
     lines.push(s.hashtags);
     lines.push('');
-
     lines.push('### CTA');
     lines.push(s.cta);
     lines.push('');
@@ -105,7 +84,6 @@ export function formatWhatsAppSummary(report: DailyReport, webUrl?: string | nul
   for (let i = 0; i < report.ideas.length; i++) {
     const idea = report.ideas[i];
     const s = idea.videoScript;
-
     lines.push(`*${i + 1}. ${idea.title}*`);
     lines.push(`_"${s.hook}"_`);
     lines.push(`${idea.platform} | ${s.duration} | Viral: ${idea.viralScore}/10`);

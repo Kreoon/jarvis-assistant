@@ -1,7 +1,10 @@
 import { callLLM } from './llm.js';
 import { matchSkills, formatSkillsForPrompt } from './skill-loader.js';
 import { agentLogger } from '../shared/logger.js';
-import { delegateToOpenClaw, isOpenClawConnected } from '../connectors/openclaw.js';
+import { initOpenClaw, delegateToOpenClaw, isOpenClawConnected } from '../connectors/openclaw.js';
+
+// Initialize OpenClaw on module load
+initOpenClaw();
 import type {
   AgentName,
   AgentRequest,
@@ -61,6 +64,28 @@ const TOOL_PROGRESS: Record<string, { start: string; done: string }> = {
   transcribe_audio: { start: 'Escuchando el audio...', done: 'Ya lo tengo' },
   // OpenClaw — universal
   openclaw_query: { start: 'Dame un momento, estoy en eso...', done: 'Listo' },
+  // Social Manager
+  get_pending_comments: { start: 'Revisando comentarios...', done: 'Listo' },
+  reply_comment: { start: 'Respondiendo...', done: 'Respondido' },
+  batch_reply_comments: { start: 'Respondiendo comentarios...', done: 'Listo' },
+  get_dms: { start: 'Revisando mensajes...', done: 'Listo' },
+  reply_dm: { start: 'Respondiendo mensaje...', done: 'Enviado' },
+  get_account_stats: { start: 'Sacando métricas...', done: 'Listo' },
+  generate_reply: { start: 'Pensando la respuesta...', done: 'Lista' },
+  // Lead Hunter
+  search_leads: { start: 'Buscando leads...', done: 'Encontré algo' },
+  qualify_lead: { start: 'Calificando lead...', done: 'Listo' },
+  store_lead: { start: 'Guardando lead...', done: 'Guardado' },
+  get_pipeline: { start: 'Mirando el pipeline...', done: 'Listo' },
+  generate_outreach: { start: 'Armando el mensaje...', done: 'Listo' },
+  update_lead_status: { start: 'Actualizando...', done: 'Listo' },
+  // Task Agent
+  create_task: { start: 'Creando la tarea...', done: 'Tarea creada' },
+  list_tasks: { start: 'Mirando las tareas...', done: 'Listo' },
+  complete_task: { start: 'Completando tarea...', done: 'Completada' },
+  get_today_tasks: { start: 'Mirando qué tienes hoy...', done: 'Listo' },
+  update_task: { start: 'Actualizando tarea...', done: 'Listo' },
+  move_task: { start: 'Moviendo la tarea...', done: 'Movida' },
 };
 
 // Universal OpenClaw tool definition — inyectada automáticamente en todos los agentes
@@ -113,6 +138,9 @@ export abstract class BaseAgent {
         content: 'Dale, ya me pongo en eso...',
         ops: 'En eso estoy...',
         analyst: 'Analizando eso, ya te cuento...',
+        social: 'Revisando las redes...',
+        'lead-hunter': 'Buscando oportunidades...',
+        'task-agent': 'Mirando las tareas...',
       };
       await onProgress(agentNames[this.config.name] || 'Dame un seg...').catch(() => {});
     }

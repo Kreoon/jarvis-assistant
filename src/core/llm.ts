@@ -6,13 +6,29 @@ import type { LLMMessage, LLMTool, LLMResponse, LLMProvider } from '../shared/ty
 
 const log = agentLogger('llm');
 
-// === Claude Client ===
 const claude = config.llm.anthropicKey
   ? new Anthropic({ apiKey: config.llm.anthropicKey })
   : null;
 
-// === Gemini Client ===
 const genai = new GoogleGenerativeAI(config.llm.geminiKey);
+
+// Fallback chain: groq -> openrouter -> gemini -> claude
+const FALLBACK_CHAIN: LLMProvider[] = ['groq', 'openrouter', 'gemini', 'claude'];
+
+// Rate limit protection: wait between calls to same provider
+const lastCallTime: Record<string, number> = {};
+const MIN_DELAY_MS: Record<string, number> = { groq: 3000, openrouter: 2000 };
+
+async function respectRateLimit(provider: string): Promise<void> {
+  const minDelay = MIN_DELAY_MS[provider];
+  if (!minDelay) return;
+  const last = lastCallTime[provider] || 0;
+  const elapsed = Date.now() - last;
+  if (elapsed < minDelay) {
+    await new Promise(resolve => setTimeout(resolve, minDelay - elapsed));
+  }
+  lastCallTime[provider] = Date.now();
+}
 
 export async function callLLM(
   messages: LLMMessage[],
@@ -24,31 +40,98 @@ export async function callLLM(
     provider?: LLMProvider;
   } = {}
 ): Promise<LLMResponse> {
-  const provider = options.provider || config.llm.primaryProvider;
+  const preferred = options.provider || config.llm.primaryProvider;
+  const chain = [preferred, ...FALLBACK_CHAIN.filter(p => p !== preferred)];
 
-  // Try primary provider, fallback to secondary
-  try {
-    if (provider === 'claude' && claude) {
-      return await callClaude(messages, options);
-    }
-    return await callGemini(messages, options);
-  } catch (error: any) {
-    log.warn({ error: error.message, provider }, 'Primary LLM failed, trying fallback');
-
+  for (const provider of chain) {
     try {
-      if (provider === 'claude') {
-        return await callGemini(messages, options);
-      } else if (claude) {
-        return await callClaude(messages, options);
+      await respectRateLimit(provider);
+      switch (provider) {
+        case 'groq':
+          if (!config.llm.groqKey) continue;
+          return await callOpenAICompat(messages, options, 'https://api.groq.com/openai/v1/chat/completions', config.llm.groqKey, options.model || 'llama-3.3-70b-versatile', 'groq');
+        case 'openrouter':
+          if (!config.llm.openrouterKey) continue;
+          return await callOpenAICompat(messages, options, 'https://openrouter.ai/api/v1/chat/completions', config.llm.openrouterKey, options.model || 'meta-llama/llama-3.3-70b-instruct:free', 'openrouter');
+        case 'gemini':
+          return await callGemini(messages, options);
+        case 'claude':
+          if (!claude) continue;
+          return await callClaude(messages, options);
+        default:
+          continue;
       }
-      throw error;
-    } catch (fallbackError: any) {
-      log.error({ error: fallbackError.message }, 'All LLM providers failed');
-      throw fallbackError;
+    } catch (error: any) {
+      log.warn({ error: error.message?.slice(0, 200), provider }, `${provider} failed, trying next`);
+      continue;
     }
   }
+
+  throw new Error('All LLM providers failed');
 }
 
+// OpenAI-compatible API (Groq, OpenRouter)
+async function callOpenAICompat(
+  messages: LLMMessage[],
+  options: { model?: string; maxTokens?: number; temperature?: number; tools?: LLMTool[] },
+  url: string,
+  apiKey: string,
+  model: string,
+  providerName: LLMProvider,
+): Promise<LLMResponse> {
+  const body: Record<string, unknown> = {
+    model,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    max_tokens: options.maxTokens || 4096,
+    temperature: options.temperature ?? 0.7,
+  };
+
+  if (options.tools?.length) {
+    body.tools = options.tools.map(t => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+
+  if (providerName === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://jarvis.kreoon.com';
+    headers['X-Title'] = 'Jarvis AI';
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    // On 429, skip to next provider immediately (don't wait long retries)
+    throw new Error(`${providerName} ${response.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as any;
+  const msg = data.choices?.[0]?.message;
+
+  const toolCalls = msg?.tool_calls?.map((tc: any) => ({
+    name: tc.function.name,
+    args: JSON.parse(tc.function.arguments || '{}'),
+  })) || [];
+
+  return {
+    text: msg?.content || '',
+    toolCalls: toolCalls.length ? toolCalls : undefined,
+    provider: providerName,
+    tokensUsed: data.usage?.total_tokens,
+  };
+}
+
+// Claude
 async function callClaude(
   messages: LLMMessage[],
   options: { model?: string; maxTokens?: number; temperature?: number; tools?: LLMTool[] }
@@ -86,13 +169,13 @@ async function callClaude(
   };
 }
 
+// Gemini (with 2.5 -> 1.5 internal fallback)
 async function callGemini(
   messages: LLMMessage[],
   options: { model?: string; maxTokens?: number; temperature?: number; tools?: LLMTool[] }
 ): Promise<LLMResponse> {
-  const model = genai.getGenerativeModel({
-    model: options.model || 'gemini-2.5-flash',
-  });
+  const modelName = options.model || 'gemini-2.5-flash';
+  const model = genai.getGenerativeModel({ model: modelName });
 
   const systemMsg = messages.find(m => m.role === 'system')?.content || '';
   const chatMessages = messages
@@ -112,15 +195,28 @@ async function callGemini(
       }]
     : undefined;
 
-  const result = await model.generateContent({
+  const genConfig = {
     contents: chatMessages,
-    systemInstruction: systemMsg ? { role: 'user', parts: [{ text: systemMsg }] } : undefined,
+    systemInstruction: systemMsg ? { role: 'user' as const, parts: [{ text: systemMsg }] } : undefined,
     generationConfig: {
       maxOutputTokens: options.maxTokens || 4096,
       temperature: options.temperature ?? 0.7,
     },
     tools,
-  });
+  };
+
+  let result;
+  try {
+    result = await model.generateContent(genConfig);
+  } catch (err: any) {
+    if (modelName === 'gemini-2.5-flash' && (err.message?.includes('503') || err.message?.includes('overloaded') || err.message?.includes('high demand'))) {
+      log.warn('Gemini 2.5 overloaded, trying 1.5 Flash');
+      const fb = genai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      result = await fb.generateContent(genConfig);
+    } else {
+      throw err;
+    }
+  }
 
   const response = result.response;
   const text = response.text?.() || '';

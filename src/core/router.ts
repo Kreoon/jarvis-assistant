@@ -2,6 +2,9 @@ import { coreAgent } from '../agents/core/index.js';
 import { memoryAgent } from '../agents/memory/index.js';
 import { contentAgent } from '../agents/content/index.js';
 import { opsAgent } from '../agents/ops/index.js';
+import { socialAgent } from '../agents/social/index.js';
+import { leadHunterAgent } from '../agents/lead-hunter/index.js';
+import { taskAgent } from '../agents/task-agent/index.js';
 import { analystAgent, isSocialMediaUrl, hasAnalystSession } from '../agents/analyst/index.js';
 import { matchSkills } from './skill-loader.js';
 import { agentLogger } from '../shared/logger.js';
@@ -47,6 +50,9 @@ const baseAgents = {
   memory: memoryAgent,
   content: contentAgent,
   ops: opsAgent,
+  social: socialAgent,
+  'lead-hunter': leadHunterAgent,
+  'task-agent': taskAgent,
 } as const;
 
 // URL regex to detect social media links in messages
@@ -233,7 +239,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
   const coreResponse = await coreAgent.handle(req, onProgress);
 
   // Parse routing from response
-  const routeMatch = coreResponse.text.match(/\[ROUTE:(\w+)\]/);
+  const routeMatch = coreResponse.text.match(/\[ROUTE:(\w[\w-]*)\]/);
   if (routeMatch) {
     const targetAgent = routeMatch[1] as AgentName;
 
@@ -246,7 +252,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
       const contentReq: AgentRequest = {
         ...req,
         agent: 'content',
-        intent: coreResponse.text.replace(/\[ROUTE:\w+\]/, '').trim(),
+        intent: coreResponse.text.replace(/\[ROUTE:\w[\w-]*\]/, '').trim(),
       };
       const response = await contentAgent.handle(contentReq, onProgress);
       storeInteraction(req, response, 'content').catch(() => {});
@@ -262,7 +268,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
       const analystReq: AgentRequest = {
         ...req,
         agent: 'analyst',
-        intent: coreResponse.text.replace(/\[ROUTE:\w+\]/, '').trim(),
+        intent: coreResponse.text.replace(/\[ROUTE:\w[\w-]*\]/, '').trim(),
       };
       const response = await analystAgent.handle(analystReq, onProgress);
       storeInteraction(req, response, 'analyst').catch(() => {});
@@ -285,6 +291,9 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
           content: 'Ya me pongo en eso...',
           ops: 'En eso estoy...',
           analyst: 'Analizando, ya te cuento...',
+          social: 'Revisando las redes...',
+          'lead-hunter': 'Buscando oportunidades...',
+          'task-agent': 'Mirando las tareas...',
         };
         await onProgress(names[targetAgent] || 'Dame un seg...').catch(() => {});
       }
@@ -292,7 +301,7 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
       const specialistReq: AgentRequest = {
         ...req,
         agent: targetAgent,
-        intent: coreResponse.text.replace(/\[ROUTE:\w+\]/, '').trim(),
+        intent: coreResponse.text.replace(/\[ROUTE:\w[\w-]*\]/, '').trim(),
       };
 
       const agent = baseAgents[targetAgent as keyof typeof baseAgents];
