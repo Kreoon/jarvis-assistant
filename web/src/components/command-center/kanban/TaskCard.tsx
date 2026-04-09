@@ -47,8 +47,10 @@ export function TaskCard({ task, workspace, onOpen }: TaskCardProps) {
       ref={setNodeRef}
       style={style}
       className={cn(
-        "glass-panel p-3 cursor-pointer transition-all duration-200 group",
-        "hover:border-jarvis-cyan/40 hover:shadow-[0_0_20px_rgba(0,229,255,0.15)]",
+        "bg-[color:var(--surface-solid)] border border-[color:var(--border)]",
+        "rounded-[var(--radius-sm)] p-3 cursor-pointer group",
+        "transition-all duration-200",
+        "hover:border-[color:var(--border-strong)]",
         isDragging && "opacity-40 scale-95"
       )}
       onClick={() => onOpen(task)}
@@ -62,15 +64,12 @@ export function TaskCard({ task, workspace, onOpen }: TaskCardProps) {
         }
       }}
     >
-      <div className="hud-border hud-tl" />
-      <div className="hud-border hud-br" />
-
       {/* Top row: drag handle + prioridad */}
       <div className="flex items-center gap-2 mb-2">
         <button
           {...attributes}
           {...listeners}
-          className="text-jarvis-cyan/20 hover:text-jarvis-cyan/60 transition-colors cursor-grab active:cursor-grabbing flex-shrink-0"
+          className="text-[color:var(--text-mute)] hover:text-[color:var(--text-dim)] transition-colors cursor-grab active:cursor-grabbing flex-shrink-0"
           aria-label="Arrastrar para reordenar"
           onClick={(e) => e.stopPropagation()}
         >
@@ -79,7 +78,7 @@ export function TaskCard({ task, workspace, onOpen }: TaskCardProps) {
 
         {/* Badge prioridad */}
         <span
-          className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm tracking-widest flex-shrink-0"
+          className="text-[8px] font-semibold px-1.5 py-0.5 rounded-sm tracking-widest flex-shrink-0"
           style={{
             color: PRIORITY_COLORS[task.priority],
             borderColor: `${PRIORITY_COLORS[task.priority]}40`,
@@ -107,7 +106,7 @@ export function TaskCard({ task, workspace, onOpen }: TaskCardProps) {
       </div>
 
       {/* Título */}
-      <p className="text-xs text-white/85 leading-relaxed mb-2 line-clamp-2">
+      <p className="text-xs text-[color:var(--text)] leading-relaxed mb-2 line-clamp-2">
         {task.title}
       </p>
 
@@ -117,7 +116,9 @@ export function TaskCard({ task, workspace, onOpen }: TaskCardProps) {
           <span
             className={cn(
               "flex items-center gap-1 text-[9px] tracking-wide",
-              dueInfo.urgent ? "text-[#ef4444]" : "text-jarvis-cyan/40"
+              dueInfo.urgent
+                ? "text-[color:var(--danger)]"
+                : "text-[color:var(--text-mute)]"
             )}
           >
             <Clock className="w-2.5 h-2.5" aria-hidden="true" />
@@ -126,13 +127,13 @@ export function TaskCard({ task, workspace, onOpen }: TaskCardProps) {
         )}
 
         {task.pomodoros_completed > 0 && (
-          <span className="flex items-center gap-1 text-[9px] text-jarvis-cyan/30 ml-auto">
+          <span className="flex items-center gap-1 text-[9px] text-[color:var(--text-mute)] ml-auto">
             🍅 {task.pomodoros_completed}
           </span>
         )}
 
         {task.tags.length > 0 && (
-          <span className="flex items-center gap-1 text-[9px] text-jarvis-cyan/30">
+          <span className="flex items-center gap-1 text-[9px] text-[color:var(--text-mute)]">
             <Tag className="w-2.5 h-2.5" aria-hidden="true" />
             {task.tags.length}
           </span>

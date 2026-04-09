@@ -1,42 +1,72 @@
 "use client";
 
 import React from "react";
-import { motion } from "framer-motion";
-import { LucideIcon } from "lucide-react";
-import { cn } from "../../lib/cn";
+import { type LucideIcon } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { Tooltip } from "./Tooltip";
 
-interface IconButtonProps {
+interface IconButtonProps
+  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   icon: LucideIcon;
-  active?: boolean;
-  onClick: () => void;
   label: string;
+  active?: boolean;
+  tooltip?: boolean;
+  tooltipSide?: "top" | "right" | "bottom" | "left";
+  size?: "sm" | "md" | "lg";
 }
 
-export function IconButton({ icon: Icon, active, onClick, label }: IconButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      aria-pressed={active}
-      className={cn(
-        "relative p-3 transition-all duration-300 group",
-        active
-          ? "text-jarvis-cyan scale-110"
-          : "text-jarvis-cyan/40 hover:text-jarvis-cyan/80"
-      )}
-    >
-      <Icon className="w-6 h-6" />
-      {active && (
-        <motion.div
-          layoutId="active-indicator"
-          className="absolute inset-0 border border-jarvis-cyan/50 rounded-lg"
-          initial={false}
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        />
-      )}
-      <span className="absolute left-16 top-1/2 -translate-y-1/2 bg-jarvis-cyan text-background text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none tracking-widest font-bold z-50">
-        {label}
-      </span>
-    </button>
-  );
-}
+const sizeMap = {
+  sm: { btn: "w-7 h-7", icon: "w-3.5 h-3.5" },
+  md: { btn: "w-9 h-9", icon: "w-4 h-4" },
+  lg: { btn: "w-11 h-11", icon: "w-5 h-5" },
+};
+
+export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
+  function IconButton(
+    {
+      icon: Icon,
+      label,
+      active = false,
+      tooltip = false,
+      tooltipSide = "right",
+      size = "md",
+      className,
+      ...props
+    },
+    ref
+  ) {
+    const sizes = sizeMap[size];
+
+    const btn = (
+      <button
+        ref={ref}
+        aria-label={label}
+        aria-pressed={active}
+        className={cn(
+          "inline-flex items-center justify-center rounded-[var(--radius-md)]",
+          "transition-colors duration-200 select-none",
+          "focus-visible:outline-2 focus-visible:outline-[color:var(--accent)] focus-visible:outline-offset-2",
+          "disabled:opacity-40 disabled:pointer-events-none",
+          sizes.btn,
+          active
+            ? "bg-[color:var(--surface-2)] text-[color:var(--accent)]"
+            : "text-[color:var(--text-mute)] hover:text-[color:var(--text-dim)] hover:bg-[color:var(--surface-2)]",
+          className
+        )}
+        {...props}
+      >
+        <Icon className={sizes.icon} aria-hidden="true" />
+      </button>
+    );
+
+    if (tooltip) {
+      return (
+        <Tooltip content={label} side={tooltipSide}>
+          {btn}
+        </Tooltip>
+      );
+    }
+
+    return btn;
+  }
+);

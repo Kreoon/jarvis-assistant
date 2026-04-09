@@ -41,16 +41,16 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
 
   if (!currentTask) {
     return (
-      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 px-6">
-        <h1 className="text-2xl text-jarvis-cyan tracking-widest glowing-text text-center">
+      <div className="fixed inset-0 bg-[color:var(--bg)] flex flex-col items-center justify-center gap-6 px-6">
+        <h1 className="text-2xl text-[color:var(--text)] font-semibold tracking-tight text-center">
           Sin tareas en la cola
         </h1>
-        <p className="text-sm text-jarvis-cyan/50 text-center max-w-md">
+        <p className="text-sm text-[color:var(--text-dim)] text-center max-w-md">
           Agrega tareas desde el tablero o usa Cmd+K para captura rápida.
         </p>
         <Link
-          href="/command-center/board"
-          className="glass-panel px-6 py-3 text-jarvis-cyan text-[10px] tracking-widest uppercase font-bold hover:border-jarvis-cyan/60 transition-colors"
+          href="/tasks"
+          className="rounded-[var(--radius-md)] px-6 py-3 text-[color:var(--accent)] text-sm font-medium border border-[color:var(--accent)]/30 hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--accent)]/10 transition-colors"
         >
           Volver al tablero
         </Link>
@@ -59,12 +59,12 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-12 px-6 py-12 overflow-y-auto">
+    <div className="fixed inset-0 bg-[color:var(--bg)] flex flex-col items-center justify-center gap-12 px-6 py-12 overflow-y-auto">
       {/* Top bar */}
       <div className="absolute top-6 right-6">
         <Link
-          href="/command-center/board"
-          className="text-jarvis-cyan/40 hover:text-jarvis-cyan transition-colors"
+          href="/tasks"
+          className="text-[color:var(--text-mute)] hover:text-[color:var(--text)] transition-colors"
           aria-label="Salir del modo foco"
         >
           <X className="w-6 h-6" />
@@ -73,7 +73,7 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
 
       {/* Queue indicator */}
       {remaining.length > 0 && (
-        <p className="absolute top-6 left-6 text-[10px] text-jarvis-cyan/40 tracking-widest uppercase font-bold">
+        <p className="absolute top-6 left-6 text-[10px] text-[color:var(--text-mute)] tracking-widest uppercase font-medium">
           {remaining.length} en cola
         </p>
       )}
@@ -81,7 +81,7 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
       {/* Task display */}
       <div className="flex flex-col items-center gap-3 max-w-2xl text-center">
         <span
-          className="text-[10px] font-bold px-2 py-1 rounded-sm tracking-widest uppercase"
+          className="text-[10px] font-semibold px-2 py-1 rounded-sm tracking-widest uppercase"
           style={{
             color: PRIORITY_COLORS[currentTask.priority],
             backgroundColor: `${PRIORITY_COLORS[currentTask.priority]}15`,
@@ -91,12 +91,12 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
           {PRIORITY_LABELS[currentTask.priority]}
         </span>
 
-        <h1 className="text-3xl md:text-4xl text-white font-bold leading-tight">
+        <h1 className="text-3xl md:text-4xl text-[color:var(--text)] font-bold leading-tight tracking-tight">
           {currentTask.title}
         </h1>
 
         {currentTask.description && (
-          <p className="text-sm text-white/60 leading-relaxed max-w-lg">
+          <p className="text-sm text-[color:var(--text-dim)] leading-relaxed max-w-lg">
             {currentTask.description}
           </p>
         )}
@@ -110,11 +110,11 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
         <button
           type="button"
           onClick={handleComplete}
-          className="glass-panel px-6 py-3 flex items-center gap-2 text-[#10b981] hover:border-[#10b981]/60 transition-colors"
+          className="rounded-[var(--radius-md)] px-6 py-3 flex items-center gap-2 text-[color:var(--success)] border border-[color:var(--success)]/40 hover:bg-[color:var(--success)]/10 hover:border-[color:var(--success)]/60 transition-colors"
           aria-label="Completar tarea"
         >
           <CheckCircle2 className="w-4 h-4" />
-          <span className="text-[10px] tracking-widest uppercase font-bold">
+          <span className="text-[10px] tracking-widest uppercase font-semibold">
             Completar tarea
           </span>
         </button>
@@ -123,11 +123,11 @@ export function FocusView({ initialTask, queue }: FocusViewProps) {
           <button
             type="button"
             onClick={advance}
-            className="glass-panel px-6 py-3 flex items-center gap-2 text-jarvis-cyan/60 hover:text-jarvis-cyan transition-colors"
+            className="rounded-[var(--radius-md)] px-6 py-3 flex items-center gap-2 text-[color:var(--text-dim)] border border-[color:var(--border)] hover:text-[color:var(--text)] hover:border-[color:var(--border-strong)] transition-colors"
             aria-label="Siguiente tarea"
           >
             <ArrowRight className="w-4 h-4" />
-            <span className="text-[10px] tracking-widest uppercase font-bold">
+            <span className="text-[10px] tracking-widest uppercase font-semibold">
               Siguiente
             </span>
           </button>

@@ -31,23 +31,26 @@ export function Filters({ workspaces, activeWorkspace }: FiltersProps) {
   const currentDate = searchParams.get("date") ?? "";
   const showCompleted = searchParams.get("completed") === "true";
 
+  const selectClass =
+    "bg-[color:var(--surface-solid)] border border-[color:var(--border)] text-[color:var(--text-dim)] text-[10px] px-2 py-1 rounded-[var(--radius-sm)] tracking-wider uppercase focus:outline-none focus:border-[color:var(--accent)] transition-colors";
+
   return (
     <div
-      className="flex flex-wrap items-center gap-2 px-3 py-2 glass-panel"
+      className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] bg-[color:var(--surface-solid)] border border-[color:var(--border)]"
       role="toolbar"
       aria-label="Filtros del tablero"
     >
-      <span className="text-[9px] text-jarvis-cyan/40 tracking-widest uppercase font-bold">
+      <span className="text-[9px] text-[color:var(--text-mute)] tracking-widest uppercase font-semibold">
         Filtros
       </span>
 
       {/* Workspace */}
       <select
-        className="bg-black/40 border border-jarvis-cyan/20 text-jarvis-cyan/80 text-[10px] px-2 py-1 rounded-sm tracking-wider uppercase"
+        className={selectClass}
         value={activeWorkspace ?? ""}
         onChange={(e) => {
           const slug = e.target.value;
-          router.push(slug ? `/command-center/board/${slug}` : `/command-center/board`);
+          router.push(slug ? `/tasks/${slug}` : `/tasks`);
         }}
         aria-label="Filtrar por workspace"
       >
@@ -61,7 +64,7 @@ export function Filters({ workspaces, activeWorkspace }: FiltersProps) {
 
       {/* Prioridad */}
       <select
-        className="bg-black/40 border border-jarvis-cyan/20 text-jarvis-cyan/80 text-[10px] px-2 py-1 rounded-sm tracking-wider uppercase"
+        className={selectClass}
         value={currentPriority}
         onChange={(e) => setParam("priority", e.target.value || null)}
         aria-label="Filtrar por prioridad"
@@ -76,7 +79,7 @@ export function Filters({ workspaces, activeWorkspace }: FiltersProps) {
 
       {/* Fecha */}
       <select
-        className="bg-black/40 border border-jarvis-cyan/20 text-jarvis-cyan/80 text-[10px] px-2 py-1 rounded-sm tracking-wider uppercase"
+        className={selectClass}
         value={currentDate}
         onChange={(e) => setParam("date", e.target.value || null)}
         aria-label="Filtrar por fecha"
@@ -88,12 +91,12 @@ export function Filters({ workspaces, activeWorkspace }: FiltersProps) {
       </select>
 
       {/* Completadas */}
-      <label className="flex items-center gap-1.5 text-[10px] text-jarvis-cyan/60 tracking-wider uppercase cursor-pointer">
+      <label className="flex items-center gap-1.5 text-[10px] text-[color:var(--text-dim)] tracking-wider uppercase cursor-pointer">
         <input
           type="checkbox"
           checked={showCompleted}
           onChange={(e) => setParam("completed", e.target.checked ? "true" : null)}
-          className="accent-jarvis-cyan"
+          className="accent-[color:var(--accent)]"
         />
         Completadas
       </label>

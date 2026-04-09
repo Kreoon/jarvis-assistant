@@ -6,7 +6,6 @@ import { X, Plus } from "lucide-react";
 import { createTask } from "@/lib/tasks/actions";
 import { PRIORITY_LABELS } from "@/lib/tasks/types";
 import type { TaskPriority, Workspace } from "@/lib/tasks/types";
-import { cn } from "@/lib/cn";
 
 interface QuickCaptureProps {
   workspaces: Workspace[];
@@ -41,7 +40,6 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
     if (open) {
       setTimeout(() => titleRef.current?.focus(), 50);
     } else {
-      // Reset al cerrar
       setTitle("");
       setWorkspaceSlug(workspaces[0]?.slug ?? "");
       setPriority("medium");
@@ -61,7 +59,6 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
         dueDate: dueDate || undefined,
       });
 
-      // Flash de confirmación, luego cerrar
       setConfirmed(true);
       setTimeout(() => {
         setOpen(false);
@@ -76,25 +73,27 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
     }
   };
 
-  // Click fuera cierra
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
       setOpen(false);
     }
   };
 
+  const selectClass =
+    "bg-[color:var(--surface-solid)] border border-[color:var(--border)] text-[color:var(--text-dim)] text-[11px] px-2 py-1.5 rounded-[var(--radius-sm)] focus:outline-none focus:border-[color:var(--accent)] transition-colors";
+
   return (
     <>
       {/* Trigger button */}
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 px-3 py-1.5 text-[10px] tracking-widest text-jarvis-cyan/60 hover:text-jarvis-cyan border border-jarvis-cyan/20 hover:border-jarvis-cyan/50 hover:bg-jarvis-cyan/5 transition-all duration-200 rounded-sm"
+        className="flex items-center gap-2 px-3 py-1.5 text-[10px] tracking-widest text-[color:var(--text-dim)] hover:text-[color:var(--text)] border border-[color:var(--border)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--surface-solid)] transition-all duration-200 rounded-[var(--radius-sm)]"
         aria-label="Abrir captura rápida (Ctrl+K)"
         title="Ctrl+K"
       >
         <Plus className="w-3 h-3" aria-hidden="true" />
         NUEVA TAREA
-        <kbd className="text-[8px] text-jarvis-cyan/30 ml-1">⌘K</kbd>
+        <kbd className="text-[8px] text-[color:var(--text-mute)] ml-1">⌘K</kbd>
       </button>
 
       {/* Modal overlay */}
@@ -106,7 +105,7 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-            style={{ background: "rgba(0,8,16,0.8)", backdropFilter: "blur(4px)" }}
+            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
             onClick={handleBackdropClick}
             role="dialog"
             aria-modal="true"
@@ -118,25 +117,17 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: -10 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className={cn(
-                "glass-panel w-full max-w-lg p-5",
-                confirmed && "capture-confirm"
-              )}
+              className="vibrancy rounded-[var(--radius-lg)] w-full max-w-lg p-5"
             >
-              <div className="hud-border hud-tl" />
-              <div className="hud-border hud-tr" />
-              <div className="hud-border hud-bl" />
-              <div className="hud-border hud-br" />
-
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] text-jarvis-cyan/60 tracking-widest uppercase font-bold">
+                <span className="text-[10px] text-[color:var(--text-dim)] tracking-widest uppercase font-semibold">
                   Captura rápida
                 </span>
                 <button
                   onClick={() => setOpen(false)}
                   aria-label="Cerrar"
-                  className="text-jarvis-cyan/30 hover:text-jarvis-cyan transition-colors"
+                  className="text-[color:var(--text-mute)] hover:text-[color:var(--text)] transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -150,21 +141,20 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
                 onChange={(e) => setTitle(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="¿Qué hay que hacer?"
-                className="w-full bg-transparent border-b border-jarvis-cyan/20 focus:border-jarvis-cyan/60 pb-2 mb-4 text-sm text-white placeholder:text-jarvis-cyan/20 focus:outline-none transition-colors tracking-wide"
+                className="w-full bg-transparent border-b border-[color:var(--border)] focus:border-[color:var(--accent)] pb-2 mb-4 text-sm text-[color:var(--text)] placeholder:text-[color:var(--text-mute)] focus:outline-none transition-colors tracking-wide"
                 autoComplete="off"
               />
 
               {/* Fila de opciones */}
               <div className="flex flex-wrap gap-3 mb-4">
-                {/* Workspace select */}
                 <div className="flex flex-col gap-1 flex-1 min-w-[120px]">
-                  <label className="text-[9px] text-jarvis-cyan/40 tracking-widest uppercase">
+                  <label className="text-[9px] text-[color:var(--text-mute)] tracking-widest uppercase">
                     Workspace
                   </label>
                   <select
                     value={workspaceSlug}
                     onChange={(e) => setWorkspaceSlug(e.target.value)}
-                    className="bg-black/40 border border-jarvis-cyan/20 text-jarvis-cyan/80 text-[11px] px-2 py-1.5 focus:outline-none focus:border-jarvis-cyan/50 tracking-wide"
+                    className={selectClass}
                     aria-label="Seleccionar workspace"
                   >
                     {workspaces.map((ws) => (
@@ -175,15 +165,14 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
                   </select>
                 </div>
 
-                {/* Prioridad select */}
                 <div className="flex flex-col gap-1 flex-1 min-w-[100px]">
-                  <label className="text-[9px] text-jarvis-cyan/40 tracking-widest uppercase">
+                  <label className="text-[9px] text-[color:var(--text-mute)] tracking-widest uppercase">
                     Prioridad
                   </label>
                   <select
                     value={priority}
                     onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                    className="bg-black/40 border border-jarvis-cyan/20 text-jarvis-cyan/80 text-[11px] px-2 py-1.5 focus:outline-none focus:border-jarvis-cyan/50 tracking-wide"
+                    className={selectClass}
                     aria-label="Seleccionar prioridad"
                   >
                     {(Object.keys(PRIORITY_LABELS) as TaskPriority[]).map((p) => (
@@ -194,16 +183,15 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
                   </select>
                 </div>
 
-                {/* Due date */}
                 <div className="flex flex-col gap-1 flex-1 min-w-[120px]">
-                  <label className="text-[9px] text-jarvis-cyan/40 tracking-widest uppercase">
+                  <label className="text-[9px] text-[color:var(--text-mute)] tracking-widest uppercase">
                     Fecha límite
                   </label>
                   <input
                     type="date"
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
-                    className="bg-black/40 border border-jarvis-cyan/20 text-jarvis-cyan/80 text-[11px] px-2 py-1.5 focus:outline-none focus:border-jarvis-cyan/50 tracking-wide"
+                    className={selectClass}
                     aria-label="Fecha límite opcional"
                   />
                 </div>
@@ -211,13 +199,13 @@ export function QuickCapture({ workspaces }: QuickCaptureProps) {
 
               {/* Botón crear */}
               <div className="flex items-center justify-between">
-                <p className="text-[9px] text-jarvis-cyan/25">
+                <p className="text-[9px] text-[color:var(--text-mute)]">
                   Enter para crear · Esc para cancelar
                 </p>
                 <button
                   onClick={handleSubmit}
                   disabled={!title.trim() || isPending || confirmed}
-                  className="px-4 py-1.5 text-[10px] tracking-widest font-bold border border-jarvis-cyan/40 text-jarvis-cyan bg-jarvis-cyan/10 hover:bg-jarvis-cyan/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                  className="px-4 py-1.5 text-[10px] tracking-widest font-semibold rounded-[var(--radius-sm)] border border-[color:var(--accent)]/40 text-[color:var(--accent)] bg-[color:var(--accent)]/10 hover:bg-[color:var(--accent)]/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
                   aria-label="Crear tarea"
                 >
                   {isPending ? "CREANDO..." : confirmed ? "CREADO" : "CREAR →"}

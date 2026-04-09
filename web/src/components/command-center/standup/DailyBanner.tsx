@@ -2,10 +2,8 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Zap, Clock, AlertTriangle } from "lucide-react";
+import { X, Zap, Clock } from "lucide-react";
 import Link from "next/link";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { setDailyFocus } from "@/lib/tasks/actions";
 import { PRIORITY_COLORS } from "@/lib/tasks/types";
 import type { Task, DailyFocus } from "@/lib/tasks/types";
@@ -27,7 +25,6 @@ export function DailyBanner({ todayTasks, existingFocus }: DailyBannerProps) {
 
   const handleDismiss = async () => {
     setDismissed(true);
-    // Guardar daily_focus vacío para hoy — marca como visto
     await setDailyFocus(top3.map((t) => t.id));
   };
 
@@ -45,7 +42,7 @@ export function DailyBanner({ todayTasks, existingFocus }: DailyBannerProps) {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -16 }}
         transition={{ duration: 0.35, ease: "easeOut" }}
-        className="glass-panel border-l-2 border-l-jarvis-cyan mb-4 p-4"
+        className="rounded-[var(--radius-md)] bg-[color:var(--surface-solid)] border border-[color:var(--border)] border-l-2 border-l-[color:var(--accent)] mb-4 p-4"
         role="banner"
         aria-label="Resumen del día"
       >
@@ -53,24 +50,24 @@ export function DailyBanner({ todayTasks, existingFocus }: DailyBannerProps) {
           <div className="flex-1 min-w-0">
             {/* Saludo */}
             <div className="flex items-center gap-2 mb-1">
-              <Zap className="w-4 h-4 text-jarvis-cyan flex-shrink-0" aria-hidden="true" />
-              <p className="text-xs text-jarvis-cyan tracking-widest font-bold">
+              <Zap className="w-4 h-4 text-[color:var(--accent)] flex-shrink-0" aria-hidden="true" />
+              <p className="text-xs text-[color:var(--text)] font-semibold tracking-tight">
                 {greeting()}, Alexander.
               </p>
             </div>
 
             {/* Stats */}
-            <p className="text-[11px] text-jarvis-cyan/60 mb-3">
+            <p className="text-[11px] text-[color:var(--text-dim)] mb-3">
               {urgentCount > 0 && (
-                <span className="text-[#ef4444]">
+                <span className="text-[color:var(--danger)]">
                   {urgentCount} {urgentCount === 1 ? "tarea urgente" : "tareas urgentes"}
                 </span>
               )}
               {urgentCount > 0 && deadlineToday > 0 && (
-                <span className="text-jarvis-cyan/40"> · </span>
+                <span className="text-[color:var(--text-mute)]"> · </span>
               )}
               {deadlineToday > 0 && (
-                <span className="text-[#f97316]">
+                <span className="text-[color:var(--warning)]">
                   {deadlineToday} con deadline hoy
                 </span>
               )}
@@ -84,7 +81,7 @@ export function DailyBanner({ todayTasks, existingFocus }: DailyBannerProps) {
               <div className="flex flex-col gap-1.5">
                 {top3.map((task, i) => (
                   <div key={task.id} className="flex items-center gap-2">
-                    <span className="text-[9px] text-jarvis-cyan/30 w-4 flex-shrink-0">
+                    <span className="text-[9px] text-[color:var(--text-mute)] w-4 flex-shrink-0">
                       {i + 1}.
                     </span>
                     <span
@@ -92,16 +89,16 @@ export function DailyBanner({ todayTasks, existingFocus }: DailyBannerProps) {
                       style={{ backgroundColor: PRIORITY_COLORS[task.priority] }}
                       aria-label={`Prioridad ${task.priority}`}
                     />
-                    <span className="text-[11px] text-white/80 truncate">{task.title}</span>
+                    <span className="text-[11px] text-[color:var(--text)] truncate">{task.title}</span>
                     {task.due_date === today && (
-                      <span className="flex items-center gap-0.5 text-[9px] text-[#ef4444] flex-shrink-0">
+                      <span className="flex items-center gap-0.5 text-[9px] text-[color:var(--danger)] flex-shrink-0">
                         <Clock className="w-2.5 h-2.5" />
                         HOY
                       </span>
                     )}
                     <Link
-                      href={`/command-center/focus?task=${task.id}`}
-                      className="ml-auto text-[9px] text-jarvis-cyan/50 hover:text-jarvis-cyan tracking-widest transition-colors whitespace-nowrap flex-shrink-0"
+                      href={`/focus?task=${task.id}`}
+                      className="ml-auto text-[9px] text-[color:var(--text-mute)] hover:text-[color:var(--accent)] tracking-widest transition-colors whitespace-nowrap flex-shrink-0"
                     >
                       EMPEZAR →
                     </Link>
@@ -115,7 +112,7 @@ export function DailyBanner({ todayTasks, existingFocus }: DailyBannerProps) {
           <button
             onClick={handleDismiss}
             aria-label="Cerrar banner del día"
-            className="text-jarvis-cyan/30 hover:text-jarvis-cyan transition-colors flex-shrink-0 mt-0.5"
+            className="text-[color:var(--text-mute)] hover:text-[color:var(--text)] transition-colors flex-shrink-0 mt-0.5"
           >
             <X className="w-4 h-4" />
           </button>

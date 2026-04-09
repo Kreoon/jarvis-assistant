@@ -83,7 +83,7 @@ export function TaskList({ tasks: initial, workspaces }: TaskListProps) {
           <section key={bucket} aria-labelledby={`bucket-${bucket}`}>
             <h2
               id={`bucket-${bucket}`}
-              className="text-[10px] text-jarvis-cyan/60 tracking-[0.3em] uppercase font-bold mb-2"
+              className="text-xs text-[color:var(--text-mute)] tracking-[0.2em] uppercase font-medium mb-2"
             >
               {bucket} · {items.length}
             </h2>
@@ -93,12 +93,12 @@ export function TaskList({ tasks: initial, workspaces }: TaskListProps) {
                 return (
                   <li
                     key={task.id}
-                    className="glass-panel px-3 py-2.5 flex items-center gap-3 group hover:border-jarvis-cyan/40 transition-colors"
+                    className="bg-[color:var(--surface-solid)] border border-[color:var(--border)] rounded-[var(--radius-sm)] px-3 py-2.5 flex items-center gap-3 group hover:border-[color:var(--border-strong)] transition-colors"
                   >
                     <button
                       type="button"
                       onClick={() => handleComplete(task.id)}
-                      className="text-jarvis-cyan/40 hover:text-[#10b981] transition-colors"
+                      className="text-[color:var(--text-mute)] hover:text-[color:var(--success)] transition-colors"
                       aria-label={`Completar ${task.title}`}
                     >
                       <Circle className="w-4 h-4 group-hover:hidden" />
@@ -107,14 +107,11 @@ export function TaskList({ tasks: initial, workspaces }: TaskListProps) {
 
                     <span
                       className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                      style={{
-                        backgroundColor: PRIORITY_COLORS[task.priority],
-                        boxShadow: `0 0 6px ${PRIORITY_COLORS[task.priority]}`,
-                      }}
+                      style={{ backgroundColor: PRIORITY_COLORS[task.priority] }}
                       aria-label={`Prioridad ${PRIORITY_LABELS[task.priority]}`}
                     />
 
-                    <span className="flex-1 text-xs text-white/85 truncate">
+                    <span className="flex-1 text-xs text-[color:var(--text)] truncate">
                       {task.title}
                     </span>
 
@@ -134,8 +131,10 @@ export function TaskList({ tasks: initial, workspaces }: TaskListProps) {
                     {task.due_date && (
                       <span
                         className={cn(
-                          "text-[9px] text-jarvis-cyan/40 tracking-wide",
-                          isToday(parseISO(task.due_date)) && "text-[#ef4444]"
+                          "text-[9px] tracking-wide",
+                          isToday(parseISO(task.due_date))
+                            ? "text-[color:var(--danger)]"
+                            : "text-[color:var(--text-mute)]"
                         )}
                       >
                         {task.due_date.split("T")[0]}
@@ -150,7 +149,7 @@ export function TaskList({ tasks: initial, workspaces }: TaskListProps) {
       })}
 
       {sorted.length === 0 && (
-        <p className="text-[10px] text-jarvis-cyan/30 tracking-widest uppercase text-center py-12">
+        <p className="text-[10px] text-[color:var(--text-mute)] tracking-widest uppercase text-center py-12">
           Sin tareas pendientes
         </p>
       )}
