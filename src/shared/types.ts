@@ -24,7 +24,7 @@ export interface TeamMember {
 }
 
 // === Sistema de Agentes ===
-export type AgentName = 'core' | 'memory' | 'content' | 'ops' | 'analyst' | 'engine';
+export type AgentName = 'core' | 'memory' | 'content' | 'ops' | 'analyst' | 'engine' | 'social' | 'lead-hunter' | 'task-agent';
 
 export interface AgentRequest {
   agent: AgentName;
@@ -122,7 +122,7 @@ export interface DailyReport {
 }
 
 // === LLM ===
-export type LLMProvider = 'claude' | 'gemini';
+export type LLMProvider = 'claude' | 'gemini' | 'groq' | 'openrouter';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';

@@ -39,10 +39,13 @@ Si Alexander dice "mándale un correo a Diana", entiendes que es tdianamile@gmai
 ## Cuándo delegar (hazlo automáticamente, sin anunciar)
 
 - Emails, calendario, Meta Ads, GitHub, recordatorios, WhatsApp → ops
-- Conectar/vincular cuentas de Google (genera link de OAuth para autorizar acceso a Gmail, Calendar y Drive) → ops
-- Crear contenido, copy, briefs, guiones, calendarios de contenido, ideas creativas → content
+- Conectar/vincular cuentas de Google → ops
+- Crear contenido, copy, briefs, calendarios de contenido, ideas creativas → content
 - Notas, memoria, Obsidian, contexto de proyectos → memory
 - Links de redes sociales o análisis de perfiles/estrategias → analyst
+- Comentarios de Instagram/TikTok, DMs, engagement, métricas de redes sociales, responder comentarios → social
+- Buscar leads, clientes potenciales, prospección, pipeline de ventas, outreach → lead-hunter
+- Tareas, kanban, Command Center, "qué tengo hoy", "nueva tarea", "completé", pomodoros → task-agent
 - Búsqueda web avanzada, automatización, capacidades extendidas, cosas que no puedas hacer → openclaw
 - Generar guiones de video, briefing diario, contenido basado en newsletters → responde "Activando el motor de contenido..." (el sistema lo detecta automáticamente)
 - Conversación casual, preguntas, opiniones, brainstorming → responde tú directamente
@@ -67,9 +70,8 @@ class CoreAgent extends BaseAgent {
   async handle(req: AgentRequest, onProgress?: ProgressCallback): Promise<AgentResponse> {
     this.log.info({ from: req.member.name, intent: req.intent }, 'Processing request');
 
-    if (onProgress) {
-      await onProgress('Va, dame un momento...').catch(() => {});
-    }
+    // No progress message for core — responses should feel instant
+    // Specialist agents send their own progress when delegated
 
     // Build messages with current date
     const messages: LLMMessage[] = [
@@ -143,7 +145,7 @@ class CoreAgent extends BaseAgent {
             properties: {
               agent: {
                 type: 'string',
-                enum: ['memory', 'content', 'ops', 'analyst', 'openclaw'],
+                enum: ['memory', 'content', 'ops', 'analyst', 'social', 'lead-hunter', 'task-agent', 'openclaw'],
                 description: 'Nombre del agente al que se delega el mensaje.',
               },
               reason: {

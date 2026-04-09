@@ -16,7 +16,9 @@ export const config = {
     anthropicKey: process.env.ANTHROPIC_API_KEY,
     geminiKey: process.env.GEMINI_API_KEY!,
     openaiKey: process.env.OPENAI_API_KEY,
-    primaryProvider: process.env.ANTHROPIC_API_KEY ? 'claude' as const : 'gemini' as const,
+    groqKey: process.env.GROQ_API_KEY,
+    openrouterKey: process.env.OPENROUTER_API_KEY,
+    primaryProvider: (process.env.GROQ_API_KEY ? 'groq' : process.env.ANTHROPIC_API_KEY ? 'claude' : 'gemini') as any,
   },
 
   perplexity: {
@@ -58,18 +60,43 @@ export const config = {
   supabase: {
     url: process.env.SUPABASE_URL,
     anonKey: process.env.SUPABASE_ANON_KEY,
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   },
 
   elevenlabs: {
     apiKey: process.env.ELEVENLABS_API_KEY,
     kiroVoiceId: process.env.ELEVENLABS_KIRO_VOICE_ID,
   },
+
   dailyEngine: {
     cron: process.env.DAILY_ENGINE_CRON || '0 6 * * 1-5',
     maxIdeas: Number(process.env.DAILY_ENGINE_MAX_IDEAS) || 3,
     ownerPhone: '573132947776',
     topics: ['inteligencia artificial', 'AI', 'tecnología', 'negocios', 'emprendimiento', 'automatización', 'startups', 'estrategia digital', 'marketing digital', 'contenido', 'motivación'],
     enabled: process.env.DAILY_ENGINE_ENABLED !== 'false',
+  },
+
+  social: {
+    metaGraphToken: process.env.META_GRAPH_TOKEN,
+    commentCheckCron: process.env.SOCIAL_COMMENT_CRON || '*/30 * * * *',
+    leadScanCron: process.env.LEAD_SCAN_CRON || '0 7 * * 1-5',
+    accounts: {
+      alexander_cast: { instagram: 'alexemprendee' },
+      reyes_contenido: { instagram: 'reyesdelcontenidoo' },
+      ugc_colombia: { instagram: 'agenciaugccolombia' },
+      esposa: { instagram: 'militougc' },
+      infiny_latam: { instagram: 'infinylatam' },
+      kreoon: { instagram: 'somoskreoon' },
+      prolab: { instagram: 'saludprolab' },
+    },
+  },
+
+  tasks: {
+    jarvisSecret: process.env.JARVIS_TASKS_SECRET,
+    n8nApiKey: process.env.N8N_TASKS_API_KEY,
+    weeklyReportCron: process.env.TASKS_WEEKLY_REPORT_CRON || '0 23 * * 0',
+    calendarSyncCron: process.env.TASKS_CALENDAR_SYNC_CRON || '*/15 * * * *',
+    obsidianDb: process.env.OBSIDIAN_DB || 'obsidian-vault',
   },
 } as const;
 

@@ -23,6 +23,9 @@ import { memoryRouter } from './routes/memory.js';
 import { engineRouter } from './routes/engine.js';
 import { calendarRouter } from './routes/calendar.js';
 import { analystRouter, initAnalystRouter } from './routes/analyst.js';
+import { tasksRouter } from './routes/tasks.js';
+import { jarvisTasksRouter } from './routes/jarvis-tasks.js';
+import { n8nTasksRouter } from './routes/n8n-tasks.js';
 
 const app = express();
 app.use(express.json({
@@ -688,7 +691,7 @@ app.get('/report/:id', (req, res) => {
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
-    agents: ['core', 'memory', 'content', 'ops', 'analyst', 'engine', 'brand-researcher'],
+    agents: ['core', 'memory', 'content', 'ops', 'analyst', 'engine', 'brand-researcher', 'task-agent'],
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
@@ -703,6 +706,11 @@ app.use('/api/memory', webAuth, memoryRouter);
 app.use('/api/engine', webAuth, engineRouter);
 app.use('/api/calendar', webAuth, calendarRouter);
 app.use('/api/analyst', webAuth, analystRouter);
+app.use('/api/tasks', webAuth, tasksRouter);
+
+// === Webhooks externos (autenticación propia, sin webAuth) ===
+app.use('/webhook/jarvis-tasks', jarvisTasksRouter);
+app.use('/webhook/n8n-tasks', n8nTasksRouter);
 
 // Legacy endpoints (keep for backwards compat)
 app.get('/api/status', webAuth, (_req, res) => {
@@ -724,9 +732,10 @@ process.on('SIGTERM', () => {
 // === Start server ===
 app.listen(config.port, () => {
   logger.info({ port: config.port }, 'Jarvis v2 is running');
-  logger.info(`Agents: core, memory, content, ops, analyst, engine, brand-researcher`);
+  logger.info(`Agents: core, memory, content, ops, analyst, engine, brand-researcher, task-agent`);
   logger.info(`LLM primary: ${config.llm.primaryProvider}`);
-  logger.info(`Web API routes: /api/chat, /api/tts, /api/system, /api/agents, /api/memory, /api/engine, /api/calendar, /api/analyst`);
+  logger.info(`Web API routes: /api/chat, /api/tts, /api/system, /api/agents, /api/memory, /api/engine, /api/calendar, /api/analyst, /api/tasks`);
+  logger.info(`Webhook routes: /webhook/jarvis-tasks, /webhook/n8n-tasks`);
 
   // Initialize scheduler after server is up
   initScheduler();
@@ -738,6 +747,29 @@ app.listen(config.port, () => {
   }).catch(err => {
     logger.error({ error: err.message }, 'Failed to initialize brand researcher');
   });
+
+  // Initialize Command Center modules
+  try {
+    import('./connectors/obsidian-sync.js').then(({ initObsidianTaskSync }) => {
+      initObsidianTaskSync();
+    }).catch(err => {
+      logger.warn({ error: err.message }, 'Failed to initialize Obsidian task sync');
+    });
+
+    import('./connectors/google-calendar-tasks.js').then(({ initCalendarTaskSync }) => {
+      initCalendarTaskSync();
+    }).catch(err => {
+      logger.warn({ error: err.message }, 'Failed to initialize calendar task sync');
+    });
+
+    import('./modules/tasks/cron.js').then(({ initTaskCrons }) => {
+      initTaskCrons();
+    }).catch(err => {
+      logger.warn({ error: err.message }, 'Failed to initialize task crons');
+    });
+  } catch (err: any) {
+    logger.warn({ error: err.message }, 'Command Center initialization error');
+  }
 
   // Register daily content engine if enabled
   if (config.dailyEngine.enabled) {

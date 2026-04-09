@@ -1,7 +1,7 @@
 FROM node:22-alpine
 
 # Install python3, yt-dlp, ffmpeg for social media extraction
-RUN apk add --no-cache python3 py3-pip ffmpeg bash git openssh-client
+RUN apk add --no-cache python3 py3-pip ffmpeg bash git openssh-client docker-cli
 RUN python3 -m pip install --break-system-packages yt-dlp
 
 RUN git config --global user.email "jarvis@kreoon.com" &&     git config --global user.name "Jarvis Bot"
