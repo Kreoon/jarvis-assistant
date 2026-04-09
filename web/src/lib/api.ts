@@ -386,3 +386,11 @@ export class JarvisAPI {
     return res.arrayBuffer();
   }
 }
+
+// Singleton client — uses JARVIS_WEB_TOKEN env var (or public fallback for browser)
+const token =
+  (typeof process !== "undefined" && process.env.JARVIS_WEB_TOKEN) ||
+  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_JARVIS_WEB_TOKEN) ||
+  "";
+
+export const apiClient = new JarvisAPI(token);

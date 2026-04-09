@@ -32,7 +32,6 @@ export function PomodoroTimer({ taskId, onCycleComplete }: PomodoroTimerProps) {
     intervalRef.current = setInterval(() => {
       setSecondsLeft((s) => {
         if (s <= 1) {
-          // Cycle completed
           if (intervalRef.current) clearInterval(intervalRef.current);
           setRunning(false);
           if (mode === "work") {
@@ -80,21 +79,20 @@ export function PomodoroTimer({ taskId, onCycleComplete }: PomodoroTimerProps) {
     }
   };
 
+  const modeColor = mode === "work" ? "var(--accent)" : "var(--success)";
+
   return (
     <div className="flex flex-col items-center gap-6">
       <p
-        className="text-[10px] tracking-[0.4em] uppercase font-bold"
-        style={{ color: mode === "work" ? "#00e5ff" : "#10b981" }}
+        className="text-[10px] tracking-[0.4em] uppercase font-semibold"
+        style={{ color: modeColor }}
       >
         {mode === "work" ? "Trabajo" : "Descanso"}
       </p>
 
       <div
         className="text-8xl md:text-9xl font-bold tabular-nums tracking-wider"
-        style={{
-          color: mode === "work" ? "#00e5ff" : "#10b981",
-          textShadow: `0 0 30px ${mode === "work" ? "rgba(0,229,255,0.4)" : "rgba(16,185,129,0.4)"}`,
-        }}
+        style={{ color: modeColor }}
         aria-live="polite"
       >
         {format(secondsLeft)}
@@ -104,11 +102,11 @@ export function PomodoroTimer({ taskId, onCycleComplete }: PomodoroTimerProps) {
         <button
           type="button"
           onClick={() => setRunning((r) => !r)}
-          className="glass-panel px-6 py-3 flex items-center gap-2 text-jarvis-cyan hover:border-jarvis-cyan/60 transition-colors"
+          className="rounded-[var(--radius-md)] px-6 py-3 flex items-center gap-2 border border-[color:var(--border)] hover:border-[color:var(--border-strong)] text-[color:var(--text)] hover:bg-[color:var(--surface-solid)] transition-colors"
           aria-label={running ? "Pausar" : "Iniciar"}
         >
           {running ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          <span className="text-[10px] tracking-widest uppercase font-bold">
+          <span className="text-[10px] tracking-widest uppercase font-semibold">
             {running ? "Pausar" : "Iniciar"}
           </span>
         </button>
@@ -116,7 +114,7 @@ export function PomodoroTimer({ taskId, onCycleComplete }: PomodoroTimerProps) {
         <button
           type="button"
           onClick={skip}
-          className="glass-panel px-4 py-3 flex items-center gap-2 text-jarvis-cyan/60 hover:text-jarvis-cyan transition-colors"
+          className="rounded-[var(--radius-md)] px-4 py-3 flex items-center gap-2 border border-[color:var(--border)] hover:border-[color:var(--border-strong)] text-[color:var(--text-dim)] hover:text-[color:var(--text)] transition-colors"
           aria-label="Saltar ciclo"
         >
           <SkipForward className="w-4 h-4" />
@@ -125,7 +123,7 @@ export function PomodoroTimer({ taskId, onCycleComplete }: PomodoroTimerProps) {
         <button
           type="button"
           onClick={reset}
-          className="glass-panel px-4 py-3 flex items-center gap-2 text-jarvis-cyan/60 hover:text-jarvis-cyan transition-colors"
+          className="rounded-[var(--radius-md)] px-4 py-3 flex items-center gap-2 border border-[color:var(--border)] hover:border-[color:var(--border-strong)] text-[color:var(--text-dim)] hover:text-[color:var(--text)] transition-colors"
           aria-label="Reiniciar"
         >
           <RotateCcw className="w-4 h-4" />
