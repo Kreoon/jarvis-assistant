@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Archive, Edit2, Plus } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -116,9 +118,11 @@ export function ProjectDetailClient({
             </Badge>
           </div>
           {project.description ? (
-            <p className="text-sm text-[color:var(--text-dim)] leading-relaxed">
-              {project.description}
-            </p>
+            <div className="text-sm text-[color:var(--text-dim)] leading-relaxed prose-invert max-w-none [&_strong]:text-[color:var(--text)] [&_strong]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:pl-5 [&_ul]:list-disc [&_li]:my-0.5 [&_code]:text-[color:var(--accent)] [&_code]:bg-[color:var(--surface-solid)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {project.description}
+              </ReactMarkdown>
+            </div>
           ) : null}
         </div>
 
