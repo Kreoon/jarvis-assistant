@@ -184,9 +184,9 @@ app.post('/webhook', async (req, res) => {
       return;
     }
 
-    // Mark as read + thinking reaction
-    await markAsRead(messageId);
-    await sendReaction(waMessage.from, messageId, '🤔');
+    // Mark as read + thinking reaction (NON-BLOCKING: no deben romper el pipeline)
+    markAsRead(messageId).catch((err) => logger.warn({ err: err.message, messageId }, 'markAsRead failed'));
+    sendReaction(waMessage.from, messageId, '🤔').catch((err) => logger.warn({ err: err.message, messageId }, 'sendReaction failed'));
 
     // Transcribe audio if needed
     if (waMessage.type === 'audio' && waMessage.mediaId) {
@@ -245,8 +245,8 @@ app.post('/webhook', async (req, res) => {
     // Send response
     await sendText(waMessage.from, response.text);
 
-    // Clear thinking reaction
-    await sendReaction(waMessage.from, messageId, '');
+    // Clear thinking reaction (non-blocking)
+    sendReaction(waMessage.from, messageId, '').catch(() => {});
 
     logger.info({ from: member.name, agent: agentReq.agent }, 'Message processed');
 

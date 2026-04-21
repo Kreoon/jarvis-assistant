@@ -78,22 +78,32 @@ export async function routeMessage(req: AgentRequest, onProgress?: ProgressCallb
 
   // === Pre-routing: Detect social media URLs ===
   const messageText = req.message.text || '';
-  log.info({ messageText: messageText?.slice(0, 200) }, 'Router checking message');
+  log.info({ messageText: messageText?.slice(0, 200), hasDirectMedia: !!req.directMedia }, 'Router checking message');
 
   const urls = messageText.match(URL_REGEX) || [];
   const socialUrl = urls.find(url => isSocialMediaUrl(url));
 
-  // === Pre-routing: Check if user has pending analyst session (waiting for A/B response) ===
-  if (hasAnalystSession(req.message.from)) {
-    log.info({ from: req.message.from }, 'User has pending analyst session, routing response to analyst');
+  // === PRIORIDAD 1: Video/imagen directo (WhatsApp o REST multipart) ===
+  if (req.directMedia) {
+    log.info({ isVideo: req.directMedia.isVideo, path: req.directMedia.localFilePath }, 'Direct media detected, routing to analyst');
     const analystReq: AgentRequest = { ...req, agent: 'analyst' };
     const response = await analystAgent.handle(analystReq, onProgress);
     storeInteraction(req, response, 'analyst').catch(() => {});
     return response;
   }
 
+  // === PRIORIDAD 2: Usuario con sesión pendiente (A/B wizard response o feedback loop) ===
+  if (hasAnalystSession(req.message.from)) {
+    log.info({ from: req.message.from }, 'Pending analyst session, routing to analyst');
+    const analystReq: AgentRequest = { ...req, agent: 'analyst' };
+    const response = await analystAgent.handle(analystReq, onProgress);
+    storeInteraction(req, response, 'analyst').catch(() => {});
+    return response;
+  }
+
+  // === PRIORIDAD 3: URL social detectada (DETERMINISTA, no depende del LLM) ===
   if (socialUrl) {
-    log.info({ url: socialUrl }, 'Social media URL detected, routing to analyst');
+    log.info({ url: socialUrl }, 'Social URL detected → analyst (deterministic pre-route)');
 
     if (onProgress) {
       await onProgress('Vi el link, déjame revisarlo...').catch(() => {});
