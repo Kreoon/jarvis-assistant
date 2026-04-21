@@ -6,6 +6,7 @@ import axios from 'axios';
 import { agentLogger } from '../../shared/logger.js';
 import type { AgentRequest, AgentResponse } from '../../shared/types.js';
 import type { ProgressCallback } from '../../core/base-agent.js';
+import { ALEXANDER_VOICE_PROFILE } from './voice-profile.js';
 
 export { isSocialMediaUrl } from '../../connectors/social-extractor.js';
 
@@ -115,31 +116,63 @@ interface AnalystSession {
   isVideo: boolean;
   content: any;
   createdAt: number;
+  lastReplica?: {
+    strategicAnalysis: string;
+    geminiAnalysis: string;
+    topic: string;
+    objective: string;
+    platform: string;
+    angle: string;
+    useAlexVoice: boolean;
+  };
 }
 
 const pendingSessions = new Map<string, AnalystSession>();
+
+// TTL: 2h para permitir feedback loop (antes 30 min)
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 
 // Exported for router to check if user has pending session
 export function hasAnalystSession(phone: string): boolean {
   const session = pendingSessions.get(phone);
   if (!session) return false;
-  // Expire after 30 min
-  if (Date.now() - session.createdAt > 30 * 60 * 1000) {
+  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
     pendingSessions.delete(phone);
     return false;
   }
   return true;
 }
 
-// Limpiar sesiones viejas (>30 min)
+// Limpiar sesiones viejas
 function cleanOldSessions() {
   const now = Date.now();
   for (const [phone, session] of pendingSessions) {
-    if (now - session.createdAt > 30 * 60 * 1000) {
+    if (now - session.createdAt > SESSION_TTL_MS) {
       deleteLocalFile(session.localFilePath).catch(() => {});
       pendingSessions.delete(phone);
     }
   }
+}
+
+// ─── Texto del menú wizard (reutilizable para URL y video directo) ──────────
+
+function wizardMenuText(meta: { platform: string; type: string; creator?: string; duration?: number | null; driveLink: string }): string {
+  const creator = meta.creator || 'desconocido';
+  const duration = meta.duration ? ` | ⏱️ ${meta.duration}s` : '';
+  return `✅ Contenido recibido y guardado en Drive
+📱 ${meta.platform} ${meta.type} | 👤 @${creator}${duration}
+📁 ${meta.driveLink}
+
+¿Qué quieres hacer?
+
+*A)* Solo análisis estratégico (12 dimensiones)
+
+*B)* Análisis + replicar para otro tema
+  → Formato: tema, objetivo, plataforma, ángulo, voz
+  Ej: "B coaching financiero, leads, Instagram, contrarian, alex"
+  • Objetivo: alcance/leads/venta/autoridad
+  • Ángulo (opcional): mainstream, contrarian, educativo, emocional, storytelling
+  • Voz (opcional): "alex" → usar tono y 5 pilares de Alexander Cast`;
 }
 
 // ─── Pipeline principal ─────────────────────────────────────────────────────
@@ -156,8 +189,61 @@ export const analystAgent = {
     // CASO 1: Usuario tiene sesión pendiente (ya descargó, está respondiendo)
     // ═══════════════════════════════════════════════════════════════
     const session = pendingSessions.get(phone);
-    if (session && !urlMatch) {
+    if (session && !urlMatch && !req.directMedia) {
       return await handleWizardResponse(session, phone, messageText, onProgress);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CASO 1.5: Video/imagen directo sin URL (WhatsApp o REST multipart)
+    // ═══════════════════════════════════════════════════════════════
+    if (req.directMedia) {
+      const { localFilePath, mimeType, caption, isVideo } = req.directMedia;
+      log.info({ localFilePath, mimeType, isVideo }, 'Starting analyst pipeline - direct media');
+
+      try {
+        if (onProgress) await onProgress('☁️ Subiendo a Google Drive...').catch(() => {});
+        const ext = localFilePath.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
+        const fileName = `direct-${phone}-${Date.now()}.${ext}`;
+        let driveLink = '';
+        try {
+          const driveResult = await uploadMediaToDrive(localFilePath, fileName, mimeType);
+          driveLink = driveResult.webViewLink;
+          if (onProgress) await onProgress('✅ Guardado en Drive').catch(() => {});
+        } catch (e: any) {
+          log.error({ error: e.message }, 'Drive upload failed (direct)');
+          driveLink = '(Error subiendo a Drive)';
+        }
+
+        pendingSessions.set(phone, {
+          url: '',
+          localFilePath,
+          driveLink,
+          mimeType,
+          isVideo,
+          content: {
+            platform: 'whatsapp-direct',
+            type: isVideo ? 'video' : 'image',
+            caption: caption || '',
+            creator: { username: req.member?.name || 'direct' },
+            duration: null,
+            hashtags: [],
+          },
+          createdAt: Date.now(),
+        });
+
+        return {
+          text: wizardMenuText({
+            platform: 'directo',
+            type: isVideo ? 'video' : 'imagen',
+            creator: req.member?.name,
+            duration: null,
+            driveLink,
+          }),
+        };
+      } catch (error: any) {
+        log.error({ error: error.message, stack: error.stack }, 'Direct media pipeline failed');
+        return { text: `❌ Error procesando el archivo: ${error.message}` };
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -165,7 +251,7 @@ export const analystAgent = {
     // ═══════════════════════════════════════════════════════════════
     if (!urlMatch) {
       return {
-        text: 'Envíame un link de Instagram, TikTok, YouTube, Twitter/X, LinkedIn o Facebook y lo analizo completo.',
+        text: 'Envíame un link de Instagram, TikTok, YouTube, Twitter/X, LinkedIn o Facebook (o un video directo) y lo analizo completo.',
       };
     }
 
@@ -217,21 +303,14 @@ export const analystAgent = {
         createdAt: Date.now(),
       });
 
-      const creator = content.creator?.username || 'desconocido';
-      const duration = content.duration ? ` | ⏱️ ${content.duration}s` : '';
-
       return {
-        text: `✅ Contenido descargado y guardado en Drive
-📱 ${content.platform} ${content.type} | 👤 @${creator}${duration}
-📁 ${driveLink}
-
-¿Qué quieres hacer?
-
-*A)* Solo análisis estratégico (12 dimensiones)
-
-*B)* Análisis + replicar para otro tema
-  → Dime: tema, objetivo (alcance/leads/venta/autoridad), plataforma
-  Ej: "B coaching financiero, leads, Instagram"`,
+        text: wizardMenuText({
+          platform: content.platform,
+          type: content.type,
+          creator: content.creator?.username,
+          duration: content.duration,
+          driveLink,
+        }),
       };
 
     } catch (error: any) {
@@ -251,6 +330,19 @@ async function handleWizardResponse(
 ): Promise<AgentResponse> {
   const lower = response.toLowerCase().trim();
 
+  // Feedback loop: detectar "mejora V2", "otra V3", "V4 más provocador"
+  const refineMatch = lower.match(/^(mejora|otra|dame|reescribe|refina)\s+(v[1-5])(.*)?$/i);
+  if (refineMatch && session.lastReplica) {
+    const targetVersion = refineMatch[2].toUpperCase();
+    const refinementHint = (refineMatch[3] || '').trim() || 'optimiza más y mejora hook/CTA';
+    if (onProgress) await onProgress(`🔄 Refinando ${targetVersion}: ${refinementHint}...`).catch(() => {});
+    const refined = await refineReplica(session.lastReplica, targetVersion, refinementHint);
+    if (onProgress) await onProgress(`✅ ${targetVersion} refinada`).catch(() => {});
+    // Extender TTL al refinar
+    session.createdAt = Date.now();
+    return { text: `🔁 **${targetVersion} refinada** (${refinementHint})\n\n${refined}` };
+  }
+
   // Detectar si es opción A o B
   const isOptionA = lower === 'a' || lower.startsWith('a)') || lower.startsWith('a ') || lower === 'solo análisis' || lower === 'solo analisis';
   const isOptionB = lower.startsWith('b') || lower.includes(','); // "B tema, objetivo, plataforma" o "tema, objetivo, plataforma"
@@ -258,14 +350,18 @@ async function handleWizardResponse(
   let replicaTopic = '';
   let replicaObjective = '';
   let replicaPlatform = '';
+  let replicaAngle = '';
+  let useAlexVoice = false;
 
   if (isOptionB) {
-    // Parse: "B coaching financiero, leads, Instagram" or "coaching financiero, leads, Instagram"
+    // Parse: "B coaching financiero, leads, Instagram, contrarian, alex"
     const cleanResponse = response.replace(/^[bB]\)?[\s]*/,'').trim();
     const parts = cleanResponse.split(',').map(p => p.trim());
     replicaTopic = parts[0] || '';
     replicaObjective = parts[1] || 'alcance';
     replicaPlatform = parts[2] || session.content.platform;
+    replicaAngle = parts[3] || '';
+    useAlexVoice = /^(alex|ac|alexander)$/i.test(parts[4] || '');
   }
 
   try {
@@ -316,17 +412,29 @@ async function handleWizardResponse(
     if (onProgress) await onProgress('✅ Análisis estratégico completo').catch(() => {});
 
     // ══════════════════════════════════════════════════════════════
-    // Si es opción B: Claude genera réplica
+    // Si es opción B: Claude genera réplica (hasta 5 versiones)
     // ══════════════════════════════════════════════════════════════
     let replicaText = '';
     if (isOptionB && replicaTopic) {
-      if (onProgress) await onProgress(`🔄 Generando réplica para: ${replicaTopic}...`).catch(() => {});
+      const versions = useAlexVoice ? '5 versiones (incluye V5 Alexander)' : '4 versiones (V1-V4)';
+      if (onProgress) await onProgress(`🔄 Generando ${versions} para: ${replicaTopic}${replicaAngle ? ` (${replicaAngle})` : ''}...`).catch(() => {});
 
       replicaText = await generateReplica(
-        strategicAnalysis, geminiAnalysis, replicaTopic, replicaObjective, replicaPlatform
+        strategicAnalysis, geminiAnalysis, replicaTopic, replicaObjective, replicaPlatform, replicaAngle, useAlexVoice
       );
 
-      if (onProgress) await onProgress('✅ Réplica generada').catch(() => {});
+      // Guardar en sesión para feedback loop
+      session.lastReplica = {
+        strategicAnalysis,
+        geminiAnalysis,
+        topic: replicaTopic,
+        objective: replicaObjective,
+        platform: replicaPlatform,
+        angle: replicaAngle,
+        useAlexVoice,
+      };
+
+      if (onProgress) await onProgress('✅ Réplicas generadas').catch(() => {});
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -491,10 +599,17 @@ async function generateReplica(
   geminiAnalysis: string,
   topic: string,
   objective: string,
-  platform: string
+  platform: string,
+  angle: string = '',
+  useAlexVoice: boolean = false
 ): Promise<string> {
+  const systemPrompt = buildReplicaSystemPrompt(useAlexVoice);
+
+  const angleLine = angle ? `- Ángulo solicitado: ${angle}` : '- Ángulo: libre (V4 siempre será opuesto al original)';
+  const voiceLine = useAlexVoice ? '- Voz V5: Alexander Cast (usar perfil completo del system)' : '- Voz V5: OMITIR (no la generes)';
+
   const response = await callLLM([
-    { role: 'system', content: REPLICA_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: `## ANÁLISIS ESTRATÉGICO DEL ORIGINAL:
 ${strategicAnalysis}
 
@@ -505,11 +620,47 @@ ${geminiAnalysis || '(No disponible)'}
 - Tema/Marca: ${topic}
 - Objetivo: ${objective}
 - Plataforma destino: ${platform}
+${angleLine}
+${voiceLine}
 
-Genera las 3 versiones de réplica.` },
+Genera ${useAlexVoice ? 'las 5 versiones' : 'las 4 versiones (V1-V4, omite V5)'} de réplica.` },
   ], {
-    maxTokens: 6000,
+    maxTokens: useAlexVoice ? 8000 : 6500,
     temperature: 0.6,
+  });
+
+  return response.text;
+}
+
+async function refineReplica(
+  lastReplica: NonNullable<AnalystSession['lastReplica']>,
+  targetVersion: string,
+  refinementHint: string
+): Promise<string> {
+  const systemPrompt = buildReplicaSystemPrompt(lastReplica.useAlexVoice);
+  const response = await callLLM([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `Ya generaste 4-5 versiones de réplica. El usuario pide refinar SOLO ${targetVersion}.
+
+Instrucción del usuario: "${refinementHint}"
+
+## ANÁLISIS ESTRATÉGICO ORIGINAL:
+${lastReplica.strategicAnalysis}
+
+## DESGLOSE VISUAL (GEMINI):
+${lastReplica.geminiAnalysis || '(No disponible)'}
+
+## DATOS DE RÉPLICA:
+- Tema/Marca: ${lastReplica.topic}
+- Objetivo: ${lastReplica.objective}
+- Plataforma destino: ${lastReplica.platform}
+- Ángulo: ${lastReplica.angle || 'libre'}
+- Voz Alexander: ${lastReplica.useAlexVoice ? 'SÍ' : 'NO'}
+
+Genera SOLO ${targetVersion} mejorada siguiendo la instrucción. Usa el mismo formato (hook, caption, hashtags, notas, brief UGC).` },
+  ], {
+    maxTokens: 3500,
+    temperature: 0.7,
   });
 
   return response.text;
@@ -566,15 +717,26 @@ REGLAS:
 - Si Gemini detectó escenas, emociones, técnicas → referencialas
 - Español colombiano, directo, sin rodeos`;
 
-const REPLICA_SYSTEM_PROMPT = `Eres un estratega de contenido de Kreoon (agencia UGC Colombia).
+function buildReplicaSystemPrompt(useAlexVoice: boolean): string {
+  const base = `Eres un estratega de contenido de Kreoon (agencia UGC Colombia).
 
-Genera 3 versiones de réplica adaptada:
+Genera versiones de réplica adaptada:
 
 V1 FIEL: Misma estructura exacta, cambia solo el tema. Respeta formato, duración, ritmo, hook, CTA.
 
 V2 MEJORADA: Optimiza gatillos faltantes, mejora hook si <7, refuerza CTA, mejor fórmula copy, neurocopy. Aplica: Cialdini, cerebro triuno, Zeigarnik.
 
 V3 KREOON UGC: Auténtico, cámara frontal, lenguaje natural. StoryBrand (cliente=héroe). Vulnerabilidad + autoridad.
+
+V4 ÁNGULO OPUESTO: Mismo tema, ángulo contrarian/disruptivo. Rompe la expectativa del formato original.
+  - Si el original es motivacional → V4 es escéptico/realista
+  - Si el original es educativo → V4 es provocador
+  - Si el original es aspiracional → V4 es crudo/honesto
+  Hook debe generar tensión desde el segundo 0.
+
+V5 ALEXANDER CAST: Solo genera si useAlexVoice=true. Usa el PERFIL DE VOZ de abajo.
+
+Si el usuario pidió un ÁNGULO específico (contrarian, educativo, emocional, storytelling, mainstream), aplícalo a V1-V3. V4 siempre es opuesto al original (independiente del ángulo pedido).
 
 Cada versión incluye:
 - Hook escrito (texto y/o guión con tiempos)
@@ -584,6 +746,9 @@ Cada versión incluye:
 - Brief para creator UGC
 
 Español colombiano natural, directo, accionable.`;
+
+  return useAlexVoice ? `${base}\n\n${ALEXANDER_VOICE_PROFILE}` : base;
+}
 
 // ─── Build prompt ───────────────────────────────────────────────────────────
 

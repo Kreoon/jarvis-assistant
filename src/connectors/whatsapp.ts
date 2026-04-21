@@ -1,4 +1,6 @@
 import axios from 'axios';
+import fs from 'fs/promises';
+import path from 'path';
 import { config } from '../shared/config.js';
 import { agentLogger } from '../shared/logger.js';
 import type { MediaAttachment } from '../shared/types.js';
@@ -65,6 +67,19 @@ export async function downloadMedia(mediaId: string): Promise<Buffer> {
   });
 
   return Buffer.from(data);
+}
+
+export async function downloadMediaToFile(
+  mediaId: string,
+  ext: string,
+  dir: string = '/app/data/tmp'
+): Promise<string> {
+  const buffer = await downloadMedia(mediaId);
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, `wa-${mediaId}-${Date.now()}.${ext}`);
+  await fs.writeFile(filePath, buffer);
+  log.info({ filePath, size: buffer.length }, 'Media downloaded to file');
+  return filePath;
 }
 
 export async function markAsRead(messageId: string): Promise<void> {

@@ -7,7 +7,7 @@ import { config, team } from './shared/config.js';
 import { logger } from './shared/logger.js';
 import { routeMessage } from './core/router.js';
 import { initScheduler, getJobs } from './core/scheduler.js';
-import { sendText, sendReaction, markAsRead } from './connectors/whatsapp.js';
+import { sendText, sendReaction, markAsRead, downloadMediaToFile } from './connectors/whatsapp.js';
 import { transcribeAudio } from './connectors/whisper.js';
 import { saveAccount } from './shared/google-api.js';
 import { pushLog } from './shared/log-buffer.js';
@@ -170,8 +170,8 @@ app.post('/webhook', async (req, res) => {
       type: msg.type,
       text: msg.text?.body || msg.caption || '',
       mediaId: msg.audio?.id || msg.image?.id || msg.document?.id || msg.video?.id,
-      mimeType: msg.audio?.mime_type || msg.image?.mime_type,
-      caption: msg.image?.caption || msg.document?.caption,
+      mimeType: msg.audio?.mime_type || msg.image?.mime_type || msg.video?.mime_type,
+      caption: msg.image?.caption || msg.document?.caption || msg.video?.caption,
       timestamp: parseInt(msg.timestamp) * 1000,
       messageId,
       platform: 'whatsapp',
@@ -193,16 +193,37 @@ app.post('/webhook', async (req, res) => {
       waMessage.text = await transcribeAudio(waMessage.mediaId);
     }
 
+    // Video directo: descargar a archivo y preparar directMedia para analyst
+    let directMedia: AgentRequest['directMedia'] | undefined;
+    if (waMessage.type === 'video' && waMessage.mediaId) {
+      try {
+        const mime = waMessage.mimeType || 'video/mp4';
+        const ext = mime.includes('quicktime') ? 'mov' : (mime.split('/')[1] || 'mp4').split(';')[0];
+        const localFilePath = await downloadMediaToFile(waMessage.mediaId, ext);
+        directMedia = {
+          localFilePath,
+          mimeType: mime,
+          caption: waMessage.caption || '',
+          isVideo: true,
+        };
+        waMessage.text = waMessage.caption || '(video)';
+        logger.info({ mediaId: waMessage.mediaId, localFilePath }, 'Video downloaded for analyst');
+      } catch (err: any) {
+        logger.error({ err: err.message }, 'Video download failed');
+      }
+    }
+
     // Add to conversation context
     addToContext(waMessage.from, 'user', waMessage.text || '(media)');
     incrementMessages();
 
     // Build agent request
     const agentReq: AgentRequest = {
-      agent: 'core',
+      agent: directMedia ? 'analyst' : 'core',
       message: waMessage,
       member,
       context: getContext(waMessage.from),
+      directMedia,
     };
 
     // Progress callback — sends status updates via WhatsApp

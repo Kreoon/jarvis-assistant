@@ -2,7 +2,7 @@
 export interface WAMessage {
   from: string;
   name?: string;
-  type: 'text' | 'audio' | 'image' | 'document' | 'location' | 'reaction';
+  type: 'text' | 'audio' | 'image' | 'video' | 'document' | 'location' | 'reaction';
   text?: string;
   mediaId?: string;
   mediaUrl?: string;
@@ -32,6 +32,12 @@ export interface AgentRequest {
   member: TeamMember;
   context?: ConversationContext;
   intent?: string;
+  directMedia?: {
+    localFilePath: string;
+    mimeType: string;
+    caption?: string;
+    isVideo: boolean;
+  };
 }
 
 export interface AgentResponse {
