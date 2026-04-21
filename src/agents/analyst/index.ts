@@ -534,25 +534,27 @@ async function handleWizardResponse(
       reportUrl = '(Error creando reporte web)';
     }
 
-    // Limpiar archivo local y sesión
+    // NO borrar sesión aún — mantener para feedback loop (mejora V2, otra V3, etc.)
+    // El archivo local se borra después de Gemini upload (ya no se necesita)
     await deleteLocalFile(session.localFilePath).catch(() => {});
-    pendingSessions.delete(phone);
 
     // ══════════════════════════════════════════════════════════════
-    // Respuesta final
+    // Respuesta final — si reporte web funcionó manda link, si no
+    // entrega el análisis COMPLETO por WhatsApp (partido en chunks si largo)
     // ══════════════════════════════════════════════════════════════
-    const replicaSection = isOptionB && replicaTopic
-      ? `\n🔄 Réplica generada para: *${replicaTopic}*`
-      : '';
+    const reportOk = reportUrl && !reportUrl.startsWith('(') && reportUrl.startsWith('http');
+    const driveOk = session.driveLink && !session.driveLink.startsWith('(') && session.driveLink.startsWith('http');
 
-    // Clean URLs to avoid WhatsApp breaking them
-    const cleanReportUrl = reportUrl.replace(/\s+/g, '').trim();
-    const cleanDriveLink = session.driveLink.replace(/\s+/g, '').trim();
+    if (reportOk) {
+      // Reporte web OK — formato corto con links
+      const replicaSection = isOptionB && replicaTopic
+        ? `\n🔄 Réplica generada para: *${replicaTopic}*`
+        : '';
+      const cleanReportUrl = reportUrl.replace(/\s+/g, '').trim();
+      const mediaLine = driveOk ? `\n📁 *Video:* ${session.driveLink.trim()}` : '';
 
-    return {
-      text: `✅ *Reporte completo listo*${replicaSection}
-
-📁 *Video:* ${cleanDriveLink}
+      return {
+        text: `✅ *Reporte completo listo*${replicaSection}${mediaLine}
 
 📊 *Reporte:* ${cleanReportUrl}
 
@@ -562,8 +564,24 @@ El reporte incluye:
 • 12 dimensiones estratégicas
 • Veredicto y oportunidades${isOptionB ? '\n• Plan de réplica para ' + replicaTopic : ''}
 
-Envía otro link cuando quieras analizar más contenido.`,
-    };
+Envía otro link para analizar más contenido, o "mejora V2"/"otra V3" para refinar.`,
+      };
+    }
+
+    // Fallback: reporte web falló → mandar análisis directamente por WhatsApp
+    const driveLine = driveOk ? `\n📁 *Video:* ${session.driveLink.trim()}\n` : '';
+    const header = `✅ *Análisis completo*${driveLine}\n━━━━━━━━━━━━━━━━━\n`;
+
+    const sections: string[] = [header + strategicAnalysis];
+
+    if (isOptionB && replicaText) {
+      sections.push(`\n━━━ 🔄 RÉPLICAS para *${replicaTopic}* ━━━\n\n${replicaText}`);
+    }
+
+    sections.push(`\n━━━━━━━━━━━━━━━━━\nEnvía otro link para analizar más, o responde "mejora V2" / "otra V3" para refinar.`);
+
+    // WhatsApp corta en 4096 chars; unimos y dejamos que sendText parta en chunks
+    return { text: sections.join('') };
 
   } catch (error: any) {
     log.error({ error: error.message, stack: error.stack }, 'Analyst analysis failed');

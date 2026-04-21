@@ -33,13 +33,15 @@ function extractShortcode(url: string): string | null {
   return m?.[2] || null;
 }
 
-async function downloadFile(url: string, dest: string): Promise<void> {
+async function downloadFile(url: string, dest: string): Promise<number> {
   const response = await axios.get(url, {
     responseType: 'arraybuffer',
     timeout: 60_000,
     maxContentLength: 200 * 1024 * 1024, // 200MB
   });
-  await fs.writeFile(dest, Buffer.from(response.data));
+  const buf = Buffer.from(response.data);
+  await fs.writeFile(dest, buf);
+  return buf.length;
 }
 
 /**
@@ -89,6 +91,15 @@ export async function scrapeInstagramViaApify(url: string): Promise<ExtractedCon
     const caption: string = item.caption || '';
     const contentType = detectContentTypeFromUrl(url);
 
+    // Debug: loggea qué fields vinieron (ayuda a diagnosticar si videoUrl está presente)
+    log.info({
+      fields: Object.keys(item).slice(0, 30),
+      hasVideoUrl: !!item.videoUrl,
+      hasVideoUrlBackup: !!item.videoUrlBackup,
+      hasDisplayUrl: !!item.displayUrl,
+      type: item.type,
+    }, 'Apify item fields');
+
     const content: ExtractedContent = {
       platform: 'instagram',
       type: contentType === 'unknown' ? 'reel' : contentType,
@@ -120,9 +131,13 @@ export async function scrapeInstagramViaApify(url: string): Promise<ExtractedCon
       await fs.mkdir(TMP_DIR, { recursive: true });
       const videoPath = path.join(TMP_DIR, `${shortcode}.mp4`);
       try {
-        await downloadFile(videoUrl, videoPath);
-        content.localFilePath = videoPath;
-        log.info({ videoPath, size: videoUrl.length }, 'Video downloaded via Apify');
+        const bytes = await downloadFile(videoUrl, videoPath);
+        if (bytes < 10_000) {
+          log.warn({ videoPath, bytes }, 'Video file suspiciously small — probably redirect or error page');
+        } else {
+          content.localFilePath = videoPath;
+          log.info({ videoPath, bytes, sizeMB: (bytes / 1024 / 1024).toFixed(2) }, 'Video downloaded via Apify');
+        }
       } catch (err: any) {
         log.error({ err: err.message, videoUrl }, 'Failed to download video from Apify URL');
       }
