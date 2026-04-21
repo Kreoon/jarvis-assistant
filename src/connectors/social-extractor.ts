@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import { agentLogger } from '../shared/logger.js';
+import { scrapeInstagramViaApify } from './apify-instagram-scraper.js';
 
 const log = agentLogger('social-extractor');
 const execFileAsync = promisify(execFile);
@@ -308,6 +309,18 @@ export async function extractContent(url: string): Promise<ExtractedContent> {
     log.info({ videoId }, 'yt-dlp extracted video id');
   } catch (err) {
     log.error({ err, url }, 'yt-dlp execution failed');
+
+    // Fallback a Apify para Instagram cuando yt-dlp falla (login required, rate limit, etc.)
+    if (platform === 'instagram') {
+      log.info({ url }, 'yt-dlp failed for Instagram, trying Apify fallback...');
+      const apifyContent = await scrapeInstagramViaApify(url);
+      if (apifyContent && apifyContent.localFilePath) {
+        log.info({ url, file: apifyContent.localFilePath }, 'Apify fallback succeeded');
+        return apifyContent;
+      }
+      log.warn({ url }, 'Apify fallback also failed or returned no video');
+    }
+
     // Return minimal content with what we know
     return {
       platform: platform as ExtractedContent['platform'],
