@@ -190,60 +190,36 @@ export const analystAgent = {
     // ═══════════════════════════════════════════════════════════════
     const session = pendingSessions.get(phone);
     if (session && !urlMatch && !req.directMedia) {
-      return await handleWizardResponse(session, phone, messageText, onProgress);
+      return await executeAnalysisAndReport(session, phone, onProgress, messageText);
     }
 
     // ═══════════════════════════════════════════════════════════════
     // CASO 1.5: Video/imagen directo sin URL (WhatsApp o REST multipart)
+    // Skip Drive upload — el video queda embebido en la página del reporte.
+    // Skip wizard A/B — análisis directo siempre; réplicas se generan desde la web.
     // ═══════════════════════════════════════════════════════════════
     if (req.directMedia) {
       const { localFilePath, mimeType, caption, isVideo } = req.directMedia;
       log.info({ localFilePath, mimeType, isVideo }, 'Starting analyst pipeline - direct media');
 
-      try {
-        if (onProgress) await onProgress('☁️ Subiendo a Google Drive...').catch(() => {});
-        const ext = localFilePath.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
-        const fileName = `direct-${phone}-${Date.now()}.${ext}`;
-        let driveLink = '';
-        try {
-          const driveResult = await uploadMediaToDrive(localFilePath, fileName, mimeType);
-          driveLink = driveResult.webViewLink;
-          if (onProgress) await onProgress('✅ Guardado en Drive').catch(() => {});
-        } catch (e: any) {
-          log.error({ error: e.message }, 'Drive upload failed (direct)');
-          driveLink = '(Error subiendo a Drive)';
-        }
-
-        pendingSessions.set(phone, {
-          url: '',
-          localFilePath,
-          driveLink,
-          mimeType,
-          isVideo,
-          content: {
-            platform: 'whatsapp-direct',
-            type: isVideo ? 'video' : 'image',
-            caption: caption || '',
-            creator: { username: req.member?.name || 'direct' },
-            duration: null,
-            hashtags: [],
-          },
-          createdAt: Date.now(),
-        });
-
-        return {
-          text: wizardMenuText({
-            platform: 'directo',
-            type: isVideo ? 'video' : 'imagen',
-            creator: req.member?.name,
-            duration: null,
-            driveLink,
-          }),
-        };
-      } catch (error: any) {
-        log.error({ error: error.message, stack: error.stack }, 'Direct media pipeline failed');
-        return { text: `❌ Error procesando el archivo: ${error.message}` };
-      }
+      const session: AnalystSession = {
+        url: '',
+        localFilePath,
+        driveLink: '',
+        mimeType,
+        isVideo,
+        content: {
+          platform: 'whatsapp-direct',
+          type: isVideo ? 'video' : 'image',
+          caption: caption || '',
+          creator: { username: req.member?.name || 'direct' },
+          duration: null,
+          hashtags: [],
+        },
+        createdAt: Date.now(),
+      };
+      pendingSessions.set(phone, session);
+      return await executeAnalysisAndReport(session, phone, onProgress);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -259,7 +235,7 @@ export const analystAgent = {
     log.info({ url }, 'Starting analyst pipeline - download phase');
 
     try {
-      // PASO 1: Descargar
+      // PASO 1: Descargar (yt-dlp con fallback Apify)
       if (onProgress) await onProgress('📥 Descargando contenido...').catch(() => {});
 
       const content = await extractContent(url);
@@ -271,47 +247,26 @@ export const analystAgent = {
       log.info({ platform: content.platform, type: content.type, file: content.localFilePath }, 'Content extracted');
       if (onProgress) await onProgress(`✅ Descargado: ${content.platform} ${content.type}`).catch(() => {});
 
-      // PASO 2: Subir a Drive
-      if (onProgress) await onProgress('☁️ Subiendo a Google Drive...').catch(() => {});
-
-      let driveLink = '';
+      // Skip upload a Drive — el video queda embebido en el reporte web (se sube a Supabase Storage).
       const ext = content.localFilePath.split('.').pop() || 'mp4';
       const isVideo = ['mp4', 'webm', 'mkv', 'mov'].includes(ext);
       const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
       const mimeType = isVideo ? `video/${ext === 'mov' ? 'quicktime' : ext}`
         : isImage ? `image/${ext === 'jpg' ? 'jpeg' : ext}`
         : 'application/octet-stream';
-      const fileName = `${content.platform}-${content.creator.username || 'unknown'}-${Date.now()}.${ext}`;
 
-      try {
-        const driveResult = await uploadMediaToDrive(content.localFilePath, fileName, mimeType);
-        driveLink = driveResult.webViewLink;
-        if (onProgress) await onProgress('✅ Guardado en Drive').catch(() => {});
-      } catch (e: any) {
-        log.error({ error: e.message }, 'Drive upload failed');
-        driveLink = '(Error subiendo a Drive)';
-      }
-
-      // PASO 3: Guardar sesión y PREGUNTAR
-      pendingSessions.set(phone, {
+      // PASO 2: Crear sesión y ejecutar análisis directo (sin wizard A/B)
+      const session: AnalystSession = {
         url,
         localFilePath: content.localFilePath,
-        driveLink,
+        driveLink: '',
         mimeType,
         isVideo,
         content,
         createdAt: Date.now(),
-      });
-
-      return {
-        text: wizardMenuText({
-          platform: content.platform,
-          type: content.type,
-          creator: content.creator?.username,
-          duration: content.duration,
-          driveLink,
-        }),
       };
+      pendingSessions.set(phone, session);
+      return await executeAnalysisAndReport(session, phone, onProgress);
 
     } catch (error: any) {
       log.error({ error: error.message, stack: error.stack }, 'Analyst download failed');
@@ -322,11 +277,18 @@ export const analystAgent = {
 
 // ─── Manejar respuesta del wizard ───────────────────────────────────────────
 
-async function handleWizardResponse(
+/**
+ * Ejecuta análisis completo + crea reporte web.
+ * Se llama directamente desde handle() (sin wizard A/B).
+ * Si hay `response` (usuario respondió después), detecta refine loops
+ * y opción B legacy (para REST endpoint). Por default (response=''),
+ * solo análisis + reporte web (las réplicas se hacen desde la web UI).
+ */
+async function executeAnalysisAndReport(
   session: AnalystSession,
   phone: string,
-  response: string,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  response: string = ''
 ): Promise<AgentResponse> {
   const lower = response.toLowerCase().trim();
 
@@ -546,41 +508,28 @@ async function handleWizardResponse(
     const driveOk = session.driveLink && !session.driveLink.startsWith('(') && session.driveLink.startsWith('http');
 
     if (reportOk) {
-      // Reporte web OK — formato corto con links
-      const replicaSection = isOptionB && replicaTopic
-        ? `\n🔄 Réplica generada para: *${replicaTopic}*`
-        : '';
       const cleanReportUrl = reportUrl.replace(/\s+/g, '').trim();
-      const mediaLine = driveOk ? `\n📁 *Video:* ${session.driveLink.trim()}` : '';
-
       return {
-        text: `✅ *Reporte completo listo*${replicaSection}${mediaLine}
+        text: `✅ *Análisis listo*
 
-📊 *Reporte:* ${cleanReportUrl}
+📊 ${cleanReportUrl}
 
-El reporte incluye:
-• Video embebido
-• Análisis visual de Gemini
-• 12 dimensiones estratégicas
-• Veredicto y oportunidades${isOptionB ? '\n• Plan de réplica para ' + replicaTopic : ''}
+Ahí ves el video + las 12 dimensiones. Desde la página puedes generar las réplicas con el wizard (tema, objetivo, plataforma, ángulo, voz).
 
-Envía otro link para analizar más contenido, o "mejora V2"/"otra V3" para refinar.`,
+Envía otro link para analizar más contenido.`,
       };
     }
 
     // Fallback: reporte web falló → mandar análisis directamente por WhatsApp
-    const driveLine = driveOk ? `\n📁 *Video:* ${session.driveLink.trim()}\n` : '';
-    const header = `✅ *Análisis completo*${driveLine}\n━━━━━━━━━━━━━━━━━\n`;
-
+    const header = `✅ *Análisis completo* (reporte web no disponible)\n━━━━━━━━━━━━━━━━━\n`;
     const sections: string[] = [header + strategicAnalysis];
 
     if (isOptionB && replicaText) {
       sections.push(`\n━━━ 🔄 RÉPLICAS para *${replicaTopic}* ━━━\n\n${replicaText}`);
     }
 
-    sections.push(`\n━━━━━━━━━━━━━━━━━\nEnvía otro link para analizar más, o responde "mejora V2" / "otra V3" para refinar.`);
+    sections.push(`\n━━━━━━━━━━━━━━━━━\nEnvía otro link para analizar más.`);
 
-    // WhatsApp corta en 4096 chars; unimos y dejamos que sendText parta en chunks
     return { text: sections.join('') };
 
   } catch (error: any) {
