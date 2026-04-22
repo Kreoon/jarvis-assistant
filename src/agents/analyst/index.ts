@@ -33,6 +33,67 @@ function extractSection(text: string, startMarker: string, endMarker: string): s
   return text.substring(startIdx, endIdx > startIdx ? endIdx : text.length).trim();
 }
 
+/**
+ * Extrae la sección "## 1. TRANSCRIPCIÓN" (o similar) del análisis markdown de Gemini.
+ * El UI de kreoon-reports la muestra línea por línea con timestamps.
+ */
+function extractTranscriptionSection(geminiText: string): string {
+  if (!geminiText) return '';
+  // Patrones de sección típicos del VIDEO_ANALYSIS_PROMPT
+  const startMatch = geminiText.match(/##\s*\d*\.?\s*TRANSCRIPCI[OÓ]N[^\n]*\n/i);
+  if (!startMatch) return '';
+  const startIdx = startMatch.index! + startMatch[0].length;
+  // Fin: próxima sección "##" o fin de texto
+  const rest = geminiText.slice(startIdx);
+  const endMatch = rest.match(/\n##\s/);
+  const content = endMatch ? rest.slice(0, endMatch.index) : rest;
+  return content.trim();
+}
+
+/**
+ * Extrae escenas estructuradas desde "## 2. ESCENAS Y ESTRUCTURA VISUAL".
+ * Cada escena tiene timestamps y descripción.
+ */
+function extractScenes(geminiText: string): Array<{
+  time_start: string; time_end: string; shot: string; camera: string;
+  action: string; text_on_screen: string | null; emotional_energy: number; emotion: string;
+}> {
+  if (!geminiText) return [];
+  const startMatch = geminiText.match(/##\s*\d*\.?\s*ESCENAS[^\n]*\n/i);
+  if (!startMatch) return [];
+  const startIdx = startMatch.index! + startMatch[0].length;
+  const rest = geminiText.slice(startIdx);
+  const endMatch = rest.match(/\n##\s/);
+  const sceneBlock = endMatch ? rest.slice(0, endMatch.index) : rest;
+
+  const scenes: any[] = [];
+  // Buscar cada bullet con timestamp del tipo: "- **0:00-0:03**" o "0:00-0:03:" o "* 0:00–0:05"
+  const sceneRegex = /(?:^|\n)[\s\-\*•]*\*{0,2}(\d+:\d+[-–]\d+:\d+)\*{0,2}[:\s]*([^\n]+)((?:\n[\s\-\*•]{2,}[^\n]+){0,8})/g;
+  let m;
+  while ((m = sceneRegex.exec(sceneBlock)) !== null && scenes.length < 20) {
+    const [tsStart, tsEnd] = m[1].split(/[-–]/);
+    const header = m[2].trim();
+    const details = (m[3] || '').toLowerCase();
+
+    // Detectar shot/camera/etc.
+    const shotM = details.match(/plano\s*:?\s*([^\n,.]+)/);
+    const cameraM = details.match(/(?:ángulo|angulo|cámara|camara)\s*:?\s*([^\n,.]+)/);
+    const textM = details.match(/texto\s*(?:en pantalla)?\s*:?\s*([^\n]+)/);
+
+    scenes.push({
+      time_start: tsStart.trim(),
+      time_end: tsEnd.trim(),
+      shot: shotM?.[1]?.trim() || 'medio',
+      camera: cameraM?.[1]?.trim() || 'frontal',
+      action: header,
+      text_on_screen: textM?.[1]?.trim() || null,
+      emotional_energy: 5,
+      emotion: 'neutral',
+    });
+  }
+  return scenes;
+}
+
 function extractEmotions(geminiText: string): any {
   if (!geminiText) return null;
   const emotions: { timestamp: string; emotion: string }[] = [];
@@ -479,7 +540,13 @@ async function executeAnalysisAndReport(
 
         drive_video_url: session.driveLink,
         drive_media_id: session.driveLink?.match(/\/d\/([^/]+)/)?.[1] || null,
-        gemini_analysis: { full_analysis: geminiAnalysis, scenes: [], production: {}, emotional_timeline: [], transcription: geminiAnalysis },
+        gemini_analysis: {
+          full_analysis: geminiAnalysis,
+          scenes: extractScenes(geminiAnalysis),
+          production: extractProductionSpecs(geminiAnalysis) || {},
+          emotional_timeline: extractEmotions(geminiAnalysis) || [],
+          transcription: extractTranscriptionSection(geminiAnalysis) || geminiAnalysis,
+        },
         strategic_analysis: { raw_text: strategicAnalysis, structure: {}, copy: {}, strategy: {} },
         verdict: { works: [], improve: [], opportunity: { title: '', description: '' } },
         scores: structured?.scores || { hook: 0, copy: 0, strategy: 0, production: 0, virality: 0, total: 0, replication_difficulty: 0 },
