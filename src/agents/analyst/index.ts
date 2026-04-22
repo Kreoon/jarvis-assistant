@@ -736,21 +736,46 @@ Genera el JSON completo.`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },
     ], {
-      maxTokens: 4000,
-      temperature: 0.4,
+      maxTokens: 8000,
+      temperature: 0.3,
     });
 
-    // Parse JSON con tolerancia
+    // Parse JSON con tolerancia progresiva
     let raw = response.text.trim();
-    raw = raw.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+    raw = raw.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '').trim();
+
+    // Intento 1: parse directo
     try {
       return JSON.parse(raw) as StructuredBlocks;
-    } catch {
-      // Buscar { ... } primer match
-      const match = raw.match(/\{[\s\S]*\}/);
-      if (match) return JSON.parse(match[0]) as StructuredBlocks;
-      throw new Error('No JSON in response');
+    } catch { /* try next */ }
+
+    // Intento 2: extraer {...} greedy
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]) as StructuredBlocks;
+      } catch { /* try next */ }
     }
+
+    // Intento 3: JSON truncado — cerrar brackets/braces pendientes
+    if (match) {
+      const candidate = match[0];
+      const opens = (candidate.match(/\{/g) || []).length;
+      const closes = (candidate.match(/\}/g) || []).length;
+      const openArr = (candidate.match(/\[/g) || []).length;
+      const closeArr = (candidate.match(/\]/g) || []).length;
+      // Cortar hasta la última coma sana y cerrar
+      const lastComma = candidate.lastIndexOf(',');
+      const safe = lastComma > 0 ? candidate.slice(0, lastComma) : candidate;
+      const closed = safe
+        + ']'.repeat(Math.max(0, openArr - closeArr))
+        + '}'.repeat(Math.max(0, opens - closes));
+      try {
+        return JSON.parse(closed) as StructuredBlocks;
+      } catch { /* fallthrough */ }
+    }
+
+    throw new Error(`Invalid JSON (${raw.length} chars)`);
   } catch (err: any) {
     log.warn({ err: err.message?.slice(0, 150) }, 'generateStructuredBlocks failed');
     return null;
