@@ -344,7 +344,8 @@ async function executeAnalysisAndReport(
         geminiAnalysis = videoAnalysis.fullAnalysis;
       } catch (e: any) {
         log.error({ error: e.message }, 'Gemini video analysis failed');
-        geminiAnalysis = `(Análisis visual no disponible: ${e.message})`;
+        // Dejar vacío para que el UI del reporte muestre el fallback "no disponible" limpio
+        geminiAnalysis = '';
         if (onProgress) await onProgress('⚠️ Análisis visual falló, continuando con texto...').catch(() => {});
       }
     } else if (session.localFilePath) {
@@ -358,7 +359,8 @@ async function executeAnalysisAndReport(
         );
       } catch (e: any) {
         log.error({ error: e.message }, 'Gemini image analysis failed');
-        geminiAnalysis = `(Análisis visual no disponible: ${e.message})`;
+        // Dejar vacío para que el UI del reporte muestre el fallback "no disponible" limpio
+        geminiAnalysis = '';
       }
     }
 
