@@ -97,14 +97,20 @@ async function ensureTmpDir(): Promise<void> {
 async function findDownloadedFile(id: string): Promise<string | undefined> {
   try {
     const files = await fs.readdir(TMP_DIR);
-    const imageExts = ['.jpg', '.jpeg', '.png', '.webp'];
-    const match = files.find((f) =>
-      f.startsWith(id + '.') &&
-      !f.endsWith('.info.json') &&
-      !f.endsWith('.json') &&
-      !imageExts.some(ext => f.endsWith(ext))
+    // Preferir extensions de VIDEO conocidas explícitamente.
+    // Evitamos .image (thumbnail de TikTok), .jpg, .png, .webp, etc.
+    const videoExts = ['.mp4', '.webm', '.mkv', '.mov', '.m4v', '.flv'];
+    // Primer intento: video match exacto
+    const videoMatch = files.find((f) =>
+      f.startsWith(id + '.') && videoExts.some((ext) => f.endsWith(ext))
     );
-    if (match) return path.join(TMP_DIR, match);
+    if (videoMatch) return path.join(TMP_DIR, videoMatch);
+    // Segundo intento: otra extension que no sea json/thumbnail conocido
+    const nonMediaExts = ['.info.json', '.json', '.jpg', '.jpeg', '.png', '.webp', '.image'];
+    const otherMatch = files.find((f) =>
+      f.startsWith(id + '.') && !nonMediaExts.some((ext) => f.endsWith(ext))
+    );
+    if (otherMatch) return path.join(TMP_DIR, otherMatch);
   } catch {
     // ignore
   }
@@ -114,7 +120,7 @@ async function findDownloadedFile(id: string): Promise<string | undefined> {
 async function findThumbnailFile(id: string): Promise<string | undefined> {
   try {
     const files = await fs.readdir(TMP_DIR);
-    const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const extensions = ['.jpg', '.jpeg', '.png', '.webp', '.image'];
     const match = files.find((f) => f.startsWith(id + '.') && extensions.some((ext) => f.endsWith(ext)));
     if (match) return path.join(TMP_DIR, match);
   } catch {
