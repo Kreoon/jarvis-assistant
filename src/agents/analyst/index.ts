@@ -402,6 +402,16 @@ async function executeAnalysisAndReport(
     }
 
     // ══════════════════════════════════════════════════════════════
+    // Generar bloques estructurados (production_guide, publish_strategy,
+    // success_metrics, scores, verdict) para llenar el reporte web
+    // ══════════════════════════════════════════════════════════════
+    if (onProgress) await onProgress('📋 Generando plan de producción y publicación...').catch(() => {});
+    const structured = await generateStructuredBlocks(strategicAnalysis, session.content).catch((e) => {
+      log.warn({ err: e.message }, 'Structured blocks generation failed, using defaults');
+      return null;
+    });
+
+    // ══════════════════════════════════════════════════════════════
     // Publicar reporte en la web app
     // ══════════════════════════════════════════════════════════════
     if (onProgress) await onProgress('🌐 Generando reporte web...').catch(() => {});
@@ -472,12 +482,12 @@ async function executeAnalysisAndReport(
         gemini_analysis: { full_analysis: geminiAnalysis, scenes: [], production: {}, emotional_timeline: [], transcription: geminiAnalysis },
         strategic_analysis: { raw_text: strategicAnalysis, structure: {}, copy: {}, strategy: {} },
         verdict: { works: [], improve: [], opportunity: { title: '', description: '' } },
-        scores: { hook: 0, copy: 0, strategy: 0, production: 0, virality: 0, total: 0, replication_difficulty: 0 },
+        scores: structured?.scores || { hook: 0, copy: 0, strategy: 0, production: 0, virality: 0, total: 0, replication_difficulty: 0 },
         wizard_config: isOptionB ? { topic: replicaTopic, objective: replicaObjective, platform: replicaPlatform } : null,
         replicas: isOptionB ? { faithful: { hook: '', script: [], caption: replicaText, hashtags: '', production_notes: '' }, improved: { hook: '', script: [], caption: '', hashtags: '', production_notes: '', improvements: [], triggers_added: [], neurocopy_changes: [] }, kreoon: { hook: '', script: [], caption: '', hashtags: '', production_notes: '', storybrand: { hero: '', guide: '', plan: '', cta: '', success: '', failure: '' }, creator_brief: {} } } : null,
-        production_guide: { checklist: [], script_timeline: [], setup: {}, music: {} },
-        publish_strategy: { best_day: '', best_time: '', timezone: 'America/Bogota', reason: '', post_actions: [], caption_final: '', hashtags_final: [], repurposing: [], week_plan: [] },
-        success_metrics: { kpis: [], benchmarks: { er_average: 0, good_post: 0, viral_threshold: 0, platform: session.content.platform }, evaluation_timeline: [], plan_b: [] },
+        production_guide: structured?.production_guide || { checklist: [], script_timeline: [], setup: {}, music: {} },
+        publish_strategy: structured?.publish_strategy || { best_day: '', best_time: '', timezone: 'America/Bogota', reason: '', post_actions: [], caption_final: '', hashtags_final: [], repurposing: [], week_plan: [] },
+        success_metrics: structured?.success_metrics || { kpis: [], benchmarks: { er_average: 0, good_post: 0, viral_threshold: 0, platform: session.content.platform }, evaluation_timeline: [], plan_b: [] },
         teleprompter_script: replicaText || null,
         branding: { show_kreoon: true, primary_color: '#FF6B00' },
       };
@@ -633,6 +643,118 @@ Genera SOLO ${targetVersion} mejorada siguiendo la instrucción. Usa el mismo fo
   });
 
   return response.text;
+}
+
+// ─── Bloques estructurados (production_guide + publish_strategy + success_metrics + scores) ──
+
+interface StructuredBlocks {
+  scores: { hook: number; copy: number; strategy: number; production: number; virality: number; total: number; replication_difficulty: number };
+  production_guide: {
+    checklist: { group: string; items: string[] }[];
+    script_timeline: { time: string; text: string; direction: string; section: string }[];
+    setup: { camera?: string; resolution?: string; lighting?: string; audio?: string; background?: string; editing?: string };
+    music: { type?: string; name?: string | null; trending?: boolean; volume_recommendation?: string; source?: string };
+  };
+  publish_strategy: {
+    best_day: string;
+    best_time: string;
+    timezone: string;
+    reason: string;
+    post_actions: { minutes_after: number; action: string }[];
+    caption_final: string;
+    hashtags_final: string[];
+    repurposing: { platform: string; format: string; adaptation: string }[];
+    week_plan: { day: string; content: string }[];
+  };
+  success_metrics: {
+    kpis: { metric: string; target: string; evaluate_at: string; status: string }[];
+    benchmarks: { er_average: number; good_post: number; viral_threshold: number; platform: string };
+    evaluation_timeline: { label: string; checks: string[] }[];
+    plan_b: string[];
+  };
+}
+
+async function generateStructuredBlocks(strategicAnalysis: string, content: any): Promise<StructuredBlocks | null> {
+  const systemPrompt = `Eres un estratega de contenido senior para Kreoon.
+
+A partir del análisis estratégico del video de referencia, genera un JSON con 4 bloques: scores, production_guide, publish_strategy, success_metrics.
+
+Responde EXCLUSIVAMENTE en JSON (sin markdown, sin backticks):
+
+{
+  "scores": { "hook": 0-10, "copy": 0-10, "strategy": 0-10, "production": 0-10, "virality": 0-10, "total": 0-10, "replication_difficulty": 0-10 },
+  "production_guide": {
+    "checklist": [{ "group": "Pre-producción|Rodaje|Edición|Post", "items": ["item1", "item2"] }],
+    "script_timeline": [{ "time": "0-3s", "text": "...", "direction": "...", "section": "hook|development|cta" }],
+    "setup": { "camera": "...", "resolution": "1080p 9:16", "lighting": "...", "audio": "...", "background": "...", "editing": "..." },
+    "music": { "type": "...", "name": null, "trending": true, "volume_recommendation": "...", "source": "..." }
+  },
+  "publish_strategy": {
+    "best_day": "Martes",
+    "best_time": "7:00 PM",
+    "timezone": "America/Bogota",
+    "reason": "por qué ese día/hora según la audiencia y plataforma",
+    "post_actions": [{ "minutes_after": 10, "action": "responder primeros comentarios" }],
+    "caption_final": "caption listo para copiar + pegar",
+    "hashtags_final": ["hashtag1", "hashtag2"],
+    "repurposing": [{ "platform": "Instagram", "format": "Reel", "adaptation": "qué ajustar" }],
+    "week_plan": [{ "day": "Lunes", "content": "idea para mantener el momentum" }]
+  },
+  "success_metrics": {
+    "kpis": [{ "metric": "Views", "target": "50k+", "evaluate_at": "48h post publish", "status": "pending" }],
+    "benchmarks": { "er_average": 3.5, "good_post": 6, "viral_threshold": 10, "platform": "${content.platform || 'instagram'}" },
+    "evaluation_timeline": [{ "label": "24h", "checks": ["views tracking", "primeros comentarios"] }],
+    "plan_b": ["Si <1k views en 24h: ajustar hook y republicar", "Si engagement bajo: pedir comentarios específicos"]
+  }
+}
+
+REGLAS:
+- Basa TODO en el análisis estratégico provisto (no inventes).
+- Score total = promedio ponderado: hook 20%, copy 20%, strategy 20%, production 15%, virality 25%.
+- replication_difficulty: 1=fácil de replicar solo, 10=requiere equipo/producción pro.
+- production_guide debe ser accionable para un creador solo con celular + micrófono.
+- publish_strategy.best_day y best_time según la plataforma del original.
+- Español LATAM, no España.
+- Números razonables, no absurdos.`;
+
+  const userMessage = `ANÁLISIS ESTRATÉGICO DEL VIDEO:
+${strategicAnalysis}
+
+DATOS DEL ORIGINAL:
+- Plataforma: ${content.platform}
+- Tipo: ${content.type}
+- Duración: ${content.duration || '?'}s
+- Views: ${content.views || '?'}
+- Likes: ${content.likes || '?'}
+- ER: ${content.views && content.likes ? ((content.likes / content.views) * 100).toFixed(2) + '%' : '?'}
+- Caption: ${(content.caption || '').slice(0, 300)}
+
+Genera el JSON completo.`;
+
+  try {
+    const response = await callLLM([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ], {
+      maxTokens: 4000,
+      temperature: 0.4,
+    });
+
+    // Parse JSON con tolerancia
+    let raw = response.text.trim();
+    raw = raw.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+    try {
+      return JSON.parse(raw) as StructuredBlocks;
+    } catch {
+      // Buscar { ... } primer match
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) return JSON.parse(match[0]) as StructuredBlocks;
+      throw new Error('No JSON in response');
+    }
+  } catch (err: any) {
+    log.warn({ err: err.message?.slice(0, 150) }, 'generateStructuredBlocks failed');
+    return null;
+  }
 }
 
 // ─── System prompts ─────────────────────────────────────────────────────────
