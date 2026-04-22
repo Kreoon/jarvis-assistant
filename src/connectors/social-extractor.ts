@@ -215,10 +215,14 @@ function mapInfoJsonToContent(url: string, platform: string, contentType: string
     }
   }
 
+  // Prefer canonical URL from yt-dlp (resuelve shortlinks como vt.tiktok.com → tiktok.com/@user/video/ID).
+  // Esencial para que el embed en la página del reporte funcione.
+  const canonicalUrl: string = info.webpage_url || info.original_url || url;
+
   return {
     platform: platform as ExtractedContent['platform'],
     type: contentType as ExtractedContent['type'],
-    url,
+    url: canonicalUrl,
     caption: captionText,
     hashtags,
     mentions,
